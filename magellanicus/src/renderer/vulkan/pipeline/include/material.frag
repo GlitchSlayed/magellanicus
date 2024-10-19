@@ -12,10 +12,14 @@ layout(set = 2, binding = 0) uniform FogData {
     float max_opacity;
 } sky_fog_data;
 
-vec3 apply_fog(float distance_from_camera, vec3 color) {
+float calculate_fog_density(float distance_from_camera) {
     float clamped = clamp(distance_from_camera, sky_fog_data.sky_fog_from, sky_fog_data.sky_fog_to);
     float interpolation = (clamped - sky_fog_data.sky_fog_from) / (sky_fog_data.sky_fog_to - sky_fog_data.sky_fog_from);
-    float fog_density = interpolation * sky_fog_data.max_opacity;
+    return interpolation * sky_fog_data.max_opacity;
+}
+
+vec3 apply_fog(float distance_from_camera, vec3 color) {
+    float fog_density = calculate_fog_density(distance_from_camera);
     return mix(color, sky_fog_data.sky_fog_color.rgb, fog_density);
 }
 #endif

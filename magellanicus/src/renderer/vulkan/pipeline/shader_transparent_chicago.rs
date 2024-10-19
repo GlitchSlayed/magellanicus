@@ -1,6 +1,6 @@
 use crate::error::MResult;
 use crate::renderer::vulkan::pipeline::pipeline_loader::{load_pipeline, DepthAccess, PipelineSettings};
-use crate::renderer::vulkan::vertex::VulkanModelVertex;
+use crate::renderer::vulkan::vertex::{VulkanModelVertex, VulkanModelVertexTextureCoords};
 use crate::renderer::vulkan::VulkanPipelineData;
 use std::sync::Arc;
 use std::vec;
@@ -13,29 +13,32 @@ use vulkano::pipeline::GraphicsPipeline;
 mod vertex {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/renderer/vulkan/pipeline/color_box/vertex.vert"
+        path: "src/renderer/vulkan/pipeline/shader_transparent_chicago/vertex.vert"
     }
 }
 
+// FIXME: remove the ./
 mod fragment {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/renderer/vulkan/pipeline/color_box/fragment.frag"
+        path: "./src/renderer/vulkan/pipeline/shader_transparent_chicago/fragment.frag"
     }
 }
 
-pub struct ColorBox {
+pub use fragment::ShaderTransparentChicagoData;
+
+pub struct ShaderTransparentChicago {
     pub pipeline: Arc<GraphicsPipeline>
 }
 
-impl ColorBox {
-    pub fn new(device: Arc<Device>, samples: SampleCount) -> MResult<Self> {
+impl ShaderTransparentChicago {
+    pub fn new(device: Arc<Device>, samples: SampleCount, blend_type: Option<AttachmentBlend>) -> MResult<Self> {
         let pipeline = load_pipeline(device, vertex::load, fragment::load, &PipelineSettings {
-            depth_access: DepthAccess::NoDepth,
-            vertex_buffer_descriptions: vec![VulkanModelVertex::per_vertex()],
+            depth_access: DepthAccess::DepthReadOnlyTransparent,
+            vertex_buffer_descriptions: vec![VulkanModelVertex::per_vertex(), VulkanModelVertexTextureCoords::per_vertex()],
             samples,
             color_blend_attachment_state: ColorBlendAttachmentState {
-                blend: Some(AttachmentBlend::alpha()),
+                blend: blend_type,
                 ..ColorBlendAttachmentState::default()
             },
             ..Default::default()
@@ -45,7 +48,7 @@ impl ColorBox {
     }
 }
 
-impl VulkanPipelineData for ColorBox {
+impl VulkanPipelineData for ShaderTransparentChicago {
     fn get_pipeline(&self) -> Arc<GraphicsPipeline> {
         self.pipeline.clone()
     }
@@ -53,6 +56,6 @@ impl VulkanPipelineData for ColorBox {
         false
     }
     fn has_fog(&self) -> bool {
-        false
+        true
     }
 }

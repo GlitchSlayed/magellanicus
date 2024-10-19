@@ -1,7 +1,7 @@
 use crate::error::MResult;
 use crate::renderer::vulkan::pipeline::pipeline_loader::{load_pipeline, DepthAccess, PipelineSettings};
 use crate::renderer::vulkan::vertex::VulkanModelVertex;
-use crate::renderer::vulkan::{VulkanPipelineData, OFFLINE_PIPELINE_COLOR_FORMAT};
+use crate::renderer::vulkan::VulkanPipelineData;
 use alloc::sync::Arc;
 use std::vec;
 use vulkano::device::Device;
@@ -33,10 +33,10 @@ impl SolidColorShader {
         let pipeline = load_pipeline(device, vertex::load, fragment::load, &PipelineSettings {
             depth_access: DepthAccess::DepthWrite,
             vertex_buffer_descriptions: vec![VulkanModelVertex::per_vertex()],
-            alpha_blending: false,
             color_blend_attachment_state: ColorBlendAttachmentState::default(),
-            samples
-        }, OFFLINE_PIPELINE_COLOR_FORMAT)?;
+            samples,
+            ..Default::default()
+        })?;
 
         Ok(Self { pipeline })
     }
@@ -45,5 +45,11 @@ impl SolidColorShader {
 impl VulkanPipelineData for SolidColorShader {
     fn get_pipeline(&self) -> Arc<GraphicsPipeline> {
         self.pipeline.clone()
+    }
+    fn has_lightmaps(&self) -> bool {
+        false
+    }
+    fn has_fog(&self) -> bool {
+        false
     }
 }

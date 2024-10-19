@@ -8,7 +8,7 @@ use vulkano::pipeline::graphics::vertex_input::Vertex;
 use crate::error::MResult;
 use crate::renderer::vulkan::pipeline::pipeline_loader::{load_pipeline, DepthAccess, PipelineSettings};
 use crate::renderer::vulkan::vertex::{VulkanModelVertex, VulkanModelVertexLightmapTextureCoords, VulkanModelVertexTextureCoords};
-use crate::renderer::vulkan::{VulkanPipelineData, OFFLINE_PIPELINE_COLOR_FORMAT};
+use crate::renderer::vulkan::VulkanPipelineData;
 
 mod vertex {
     vulkano_shaders::shader! {
@@ -37,13 +37,13 @@ impl SimpleTextureShader {
                 VulkanModelVertexTextureCoords::per_vertex(),
                 VulkanModelVertexLightmapTextureCoords::per_vertex()
             ],
-            alpha_blending: false,
             color_blend_attachment_state: ColorBlendAttachmentState {
                 blend: Some(AttachmentBlend::additive()),
                 ..ColorBlendAttachmentState::default()
             },
-            samples
-        }, OFFLINE_PIPELINE_COLOR_FORMAT)?;
+            samples,
+            ..Default::default()
+        })?;
 
         Ok(Self { pipeline })
     }
@@ -52,5 +52,11 @@ impl SimpleTextureShader {
 impl VulkanPipelineData for SimpleTextureShader {
     fn get_pipeline(&self) -> Arc<GraphicsPipeline> {
         self.pipeline.clone()
+    }
+    fn has_lightmaps(&self) -> bool {
+        true
+    }
+    fn has_fog(&self) -> bool {
+        true
     }
 }

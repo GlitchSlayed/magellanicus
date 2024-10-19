@@ -5,7 +5,7 @@ use std::vec;
 use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::image::SampleCount;
-use vulkano::pipeline::graphics::color_blend::{AttachmentBlend, ColorBlendAttachmentState, ColorBlendState};
+use vulkano::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
 use vulkano::pipeline::graphics::depth_stencil::{CompareOp, DepthState, DepthStencilState};
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::multisample::MultisampleState;
@@ -16,6 +16,7 @@ use vulkano::pipeline::graphics::viewport::ViewportState;
 use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
 use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vulkano::pipeline::{DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo};
+use crate::renderer::vulkan::OFFLINE_PIPELINE_COLOR_FORMAT;
 
 #[derive(Copy, Clone, Default, PartialEq)]
 pub enum DepthAccess {
@@ -58,11 +59,11 @@ pub struct PipelineSettings {
     /// Determines how to blend
     pub color_blend_attachment_state: ColorBlendAttachmentState,
 
-    /// If true, enable alpha blending. Otherwise, the pixel color will be replaced.
-    pub alpha_blending: bool,
-
     /// Sample count to use.
-    pub samples: SampleCount
+    pub samples: SampleCount,
+
+    /// Color format to use
+    pub format: Format
 }
 
 impl Default for PipelineSettings {
@@ -71,8 +72,8 @@ impl Default for PipelineSettings {
             depth_access: Default::default(),
             vertex_buffer_descriptions: Default::default(),
             color_blend_attachment_state: Default::default(),
-            alpha_blending: Default::default(),
             samples: SampleCount::Sample1,
+            format: OFFLINE_PIPELINE_COLOR_FORMAT
         }
     }
 }
@@ -81,8 +82,7 @@ pub fn load_pipeline(
     device: Arc<Device>,
     load_vertex_shader: fn (Arc<Device>) -> Result<Arc<vulkano::shader::ShaderModule>, vulkano::Validated<vulkano::VulkanError>>,
     load_fragment_shader: fn (Arc<Device>) -> Result<Arc<vulkano::shader::ShaderModule>, vulkano::Validated<vulkano::VulkanError>>,
-    settings: &PipelineSettings,
-    color_format: Format
+    settings: &PipelineSettings
 ) -> MResult<Arc<GraphicsPipeline>> {
     let vertex_shader = load_vertex_shader(device.clone())?
         .entry_point("main")
@@ -108,19 +108,15 @@ pub fn load_pipeline(
     )?;
 
     let subpass = PipelineRenderingCreateInfo {
-        color_attachment_formats: vec![Some(color_format)],
+        color_attachment_formats: vec![Some(settings.format)],
         depth_attachment_format: Some(Format::D32_SFLOAT),
         ..Default::default()
     };
 
-    let mut blend = ColorBlendState::with_attachment_states(
+    let blend = ColorBlendState::with_attachment_states(
         subpass.color_attachment_formats.len() as u32,
         settings.color_blend_attachment_state.clone(),
     );
-
-    if settings.alpha_blending {
-        blend.attachments[0].blend = Some(AttachmentBlend::alpha());
-    }
 
     let pipeline = GraphicsPipeline::new(
         device.clone(),

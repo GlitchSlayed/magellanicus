@@ -11,7 +11,8 @@ impl Shader {
     pub fn load_from_parameters(renderer: &mut Renderer, add_shader_parameter: AddShaderParameter) -> MResult<Self> {
         let shader_type = match &add_shader_parameter.data {
             AddShaderData::BasicShader(s) => s.shader_type,
-            AddShaderData::ShaderEnvironment(_) => ShaderType::Environment
+            AddShaderData::ShaderEnvironment(_) => ShaderType::Environment,
+            AddShaderData::ShaderTransparentChicago(_) => ShaderType::TransparentChicago
         };
 
         let vulkan = VulkanMaterialShaderData::new_from_parameters(

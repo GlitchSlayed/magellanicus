@@ -336,26 +336,36 @@ impl Renderer {
     fn get_default_2d(&self, default_type: DefaultType) -> &BitmapBitmap {
         &self.bitmaps[&self.default_bitmaps.default_2d].bitmaps[default_type as usize]
     }
+    fn get_default_cubemap(&self, default_type: DefaultType) -> &BitmapBitmap {
+        &self.bitmaps[&self.default_bitmaps.default_cubemap].bitmaps[default_type as usize]
+    }
     fn get_or_default_2d(&self, bitmap: &Option<String>, bitmap_index: usize, default_type: DefaultType) -> &BitmapBitmap {
-        match bitmap.as_ref() {
+        let bitmap = match bitmap.as_ref() {
             Some(n) => &self.bitmaps[n].bitmaps[bitmap_index],
             None => &self.get_default_2d(default_type)
-        }
+        };
+        debug_assert_eq!(BitmapType::Dim2D, bitmap.bitmap_type);
+        bitmap
     }
     fn get_or_default_3d(&self, bitmap: &Option<String>, bitmap_index: usize, default_type: DefaultType) -> &BitmapBitmap {
-        match bitmap.as_ref() {
+        let bitmap = match bitmap.as_ref() {
             Some(n) => &self.bitmaps[n].bitmaps[bitmap_index],
             None => &self.bitmaps[&self.default_bitmaps.default_3d].bitmaps[default_type as usize]
-        }
+        };
+        debug_assert!(matches!(bitmap.bitmap_type, BitmapType::Dim3D { .. }));
+        bitmap
     }
     fn get_or_default_cubemap(&self, bitmap: &Option<String>, bitmap_index: usize, default_type: DefaultType) -> &BitmapBitmap {
-        match bitmap.as_ref() {
+        let bitmap = match bitmap.as_ref() {
             Some(n) => &self.bitmaps[n].bitmaps[bitmap_index],
             None => &self.bitmaps[&self.default_bitmaps.default_cubemap].bitmaps[default_type as usize]
-        }
+        };
+        debug_assert_eq!(BitmapType::Cubemap, bitmap.bitmap_type);
+        bitmap
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
 #[repr(usize)]
 enum DefaultType {
     /// Describes a map with all channels set to 0x00.

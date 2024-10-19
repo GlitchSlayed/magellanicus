@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use vulkano::device::Device;
 use vulkano::image::SampleCount;
+use vulkano::pipeline::graphics::color_blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::GraphicsPipeline;
 use crate::error::MResult;
 
@@ -10,9 +11,12 @@ pub mod simple_texture;
 mod pipeline_loader;
 mod color_box;
 pub mod shader_environment;
+pub mod shader_transparent_chicago;
 
 pub trait VulkanPipelineData: Send + Sync + 'static {
     fn get_pipeline(&self) -> Arc<GraphicsPipeline>;
+    fn has_lightmaps(&self) -> bool;
+    fn has_fog(&self) -> bool;
 }
 
 pub fn load_all_pipelines(device: Arc<Device>, samples: SampleCount) -> MResult<BTreeMap<VulkanPipelineType, Arc<dyn VulkanPipelineData>>> {
@@ -22,6 +26,49 @@ pub fn load_all_pipelines(device: Arc<Device>, samples: SampleCount) -> MResult<
     pipelines.insert(VulkanPipelineType::SimpleTexture, Arc::new(simple_texture::SimpleTextureShader::new(device.clone(), samples)?));
     pipelines.insert(VulkanPipelineType::ColorBox, Arc::new(color_box::ColorBox::new(device.clone(), samples)?));
     pipelines.insert(VulkanPipelineType::ShaderEnvironment, Arc::new(shader_environment::ShaderEnvironment::new(device.clone(), samples)?));
+
+    let add = AttachmentBlend::additive();
+    let alpha_blend = AttachmentBlend::alpha();
+    let subtract = AttachmentBlend {
+        src_color_blend_factor: BlendFactor::One,
+        dst_color_blend_factor: BlendFactor::One,
+        color_blend_op: BlendOp::Subtract,
+        src_alpha_blend_factor: BlendFactor::One,
+        dst_alpha_blend_factor: BlendFactor::One,
+        alpha_blend_op: BlendOp::Subtract,
+    };
+    let component_min = AttachmentBlend {
+        src_color_blend_factor: BlendFactor::One,
+        dst_color_blend_factor: BlendFactor::One,
+        color_blend_op: BlendOp::Min,
+        src_alpha_blend_factor: BlendFactor::One,
+        dst_alpha_blend_factor: BlendFactor::One,
+        alpha_blend_op: BlendOp::Min,
+    };
+    let component_max = AttachmentBlend {
+        src_color_blend_factor: BlendFactor::One,
+        dst_color_blend_factor: BlendFactor::One,
+        color_blend_op: BlendOp::Max,
+        src_alpha_blend_factor: BlendFactor::One,
+        dst_alpha_blend_factor: BlendFactor::One,
+        alpha_blend_op: BlendOp::Max,
+    };
+    let multiply = AttachmentBlend {
+        src_color_blend_factor: BlendFactor::SrcColor,
+        dst_color_blend_factor: BlendFactor::OneMinusSrcColor,
+        color_blend_op: BlendOp::Add,
+        src_alpha_blend_factor: BlendFactor::SrcAlpha,
+        dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
+        alpha_blend_op: BlendOp::Add,
+    };
+
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoAdd, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(add))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoAlphaBlend, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(alpha_blend))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoSubtract, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(subtract))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMin, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(component_min))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMax, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(component_max))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoMultiply, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(multiply))?));
+
 
     Ok(pipelines)
 }
@@ -42,4 +89,17 @@ pub enum VulkanPipelineType {
 
     /// shader_environment
     ShaderEnvironment,
+
+    /// shader_transparent_chicago + Add
+    ShaderTransparentChicagoAdd,
+    /// shader_transparent_chicago + Alpha Blend
+    ShaderTransparentChicagoAlphaBlend,
+    /// shader_transparent_chicago + Subtract
+    ShaderTransparentChicagoSubtract,
+    /// shader_transparent_chicago + Component Min
+    ShaderTransparentChicagoComponentMin,
+    /// shader_transparent_chicago + Component Max
+    ShaderTransparentChicagoComponentMax,
+    /// shader_transparent_chicago + Multiply
+    ShaderTransparentChicagoMultiply
 }

@@ -1,7 +1,7 @@
 use crate::error::MResult;
 use crate::renderer::vulkan::pipeline::pipeline_loader::{load_pipeline, DepthAccess, PipelineSettings};
 use crate::renderer::vulkan::vertex::{VulkanModelVertex, VulkanModelVertexLightmapTextureCoords, VulkanModelVertexTextureCoords};
-use crate::renderer::vulkan::{VulkanPipelineData, OFFLINE_PIPELINE_COLOR_FORMAT};
+use crate::renderer::vulkan::VulkanPipelineData;
 use std::sync::Arc;
 use std::vec;
 use vulkano::device::Device;
@@ -36,10 +36,10 @@ impl ShaderEnvironment {
         let pipeline = load_pipeline(device, vertex::load, fragment::load, &PipelineSettings {
             depth_access: DepthAccess::DepthWrite,
             vertex_buffer_descriptions: vec![VulkanModelVertex::per_vertex(), VulkanModelVertexTextureCoords::per_vertex(), VulkanModelVertexLightmapTextureCoords::per_vertex()],
-            alpha_blending: false,
             samples,
-            color_blend_attachment_state: ColorBlendAttachmentState::default()
-        }, OFFLINE_PIPELINE_COLOR_FORMAT)?;
+            color_blend_attachment_state: ColorBlendAttachmentState::default(),
+            ..Default::default()
+        })?;
 
         Ok(Self { pipeline })
     }
@@ -48,5 +48,11 @@ impl ShaderEnvironment {
 impl VulkanPipelineData for ShaderEnvironment {
     fn get_pipeline(&self) -> Arc<GraphicsPipeline> {
         self.pipeline.clone()
+    }
+    fn has_lightmaps(&self) -> bool {
+        true
+    }
+    fn has_fog(&self) -> bool {
+        true
     }
 }

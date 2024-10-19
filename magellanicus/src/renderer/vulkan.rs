@@ -437,8 +437,6 @@ impl VulkanRenderer {
             Vec3::new(0.0, 0.0, -1.0)
         );
 
-        upload_fog_uniform(renderer, &fog_data, command_builder);
-
         let geo_shader_iterator = currently_loaded_bsp
             .geometry_indices_sorted_by_material
             .iter()
@@ -449,15 +447,14 @@ impl VulkanRenderer {
         let transparent = geo_shader_iterator.clone().filter(|s| s.1.is_transparent());
 
         upload_main_material_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj, command_builder);
-        command_builder.set_cull_mode(CullMode::Back).unwrap();
 
         // Draw non-transparent shaders first
         let mut last_shader = None;
         for (geometry, shader) in opaque {
-            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, shader);
+            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, &fog_data, shader);
         }
         for (geometry, shader) in transparent {
-            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, shader);
+            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, &fog_data, shader);
         }
 
         command_builder.end_rendering().expect("failed to end rendering inside viewport");
@@ -470,37 +467,56 @@ impl VulkanRenderer {
         camera: &Camera,
         last_shader: &'b mut Option<&'a Arc<String>>,
         geometry: &'a BSPGeometry,
+        fog_data: &FogData,
         shader: &Arc<dyn VulkanMaterial>
     ) {
         let this_shader = &geometry.vulkan.shader;
-        let repeat_shader = if *last_shader != Some(this_shader) {
-            *last_shader = Some(this_shader);
+        let repeat_shader = if *last_shader != Some(this_shader) && shader.can_reuse_descriptors() {
             false
         }
         else {
             true
         };
+        *last_shader = Some(this_shader);
 
+        let main_pipeline = shader.get_main_pipeline();
         let mut desired_lightmap = geometry.lightmap_index;
         if !camera.lightmaps {
             desired_lightmap = None;
         }
 
-        upload_lightmap_descriptor_set(renderer, desired_lightmap, &currently_loaded_bsp, &mut command_builder);
+        if !repeat_shader {
+            command_builder
+                .bind_pipeline_graphics(main_pipeline.get_pipeline())
+                .expect("tried to bind pipeline");
+            command_builder.set_cull_mode(CullMode::Back)
+                .expect("tried to set cull mode back to Back");
+        }
+
+        upload_fog_uniform(renderer, fog_data, &mut command_builder, main_pipeline.clone());
+        upload_lightmap_descriptor_set(desired_lightmap, &currently_loaded_bsp, &mut command_builder, main_pipeline.clone());
 
         let index_buffer = geometry.vulkan.index_buffer.clone();
         let index_count = index_buffer.len() as usize;
         command_builder.bind_index_buffer(index_buffer).expect("can't bind indices");
 
-        command_builder.bind_vertex_buffers(0, (
-            geometry.vulkan.vertex_buffer.clone(),
-            geometry.vulkan.texture_coords_buffer.clone(),
-            if geometry.vulkan.lightmap_texture_coords_buffer.is_none() {
+        if main_pipeline.has_lightmaps() {
+            command_builder.bind_vertex_buffers(0, (
+                geometry.vulkan.vertex_buffer.clone(),
+                geometry.vulkan.texture_coords_buffer.clone(),
+                if geometry.vulkan.lightmap_texture_coords_buffer.is_none() {
+                    geometry.vulkan.texture_coords_buffer.clone()
+                } else {
+                    geometry.vulkan.lightmap_texture_coords_buffer.clone().unwrap()
+                }
+            )).unwrap();
+        }
+        else {
+            command_builder.bind_vertex_buffers(0, (
+                geometry.vulkan.vertex_buffer.clone(),
                 geometry.vulkan.texture_coords_buffer.clone()
-            } else {
-                geometry.vulkan.lightmap_texture_coords_buffer.clone().unwrap()
-            }
-        )).unwrap();
+            )).unwrap();
+        }
 
         shader
             .generate_commands(renderer, index_count as u32, repeat_shader, &mut command_builder)
@@ -621,19 +637,22 @@ impl Error {
 }
 
 fn upload_lightmap_descriptor_set(
-    renderer: &Renderer,
     lightmap_index: Option<usize>,
     bsp: &BSP,
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
+    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    pipeline: Arc<dyn VulkanPipelineData>
 ) {
-    let pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
+    if !pipeline.has_lightmaps() {
+        return;
+    }
+
     let set = lightmap_index
         .and_then(|i| bsp.vulkan.lightmap_images.get(&i))
         .map(|b| b.clone())
         .unwrap_or_else(|| bsp.vulkan.null_lightmaps.clone());
     builder.bind_descriptor_sets(
         PipelineBindPoint::Graphics,
-        pipeline.layout().clone(),
+        pipeline.get_pipeline().layout().clone(),
         1,
         set
     ).unwrap();
@@ -711,9 +730,12 @@ fn upload_main_material_uniform(
 fn upload_fog_uniform(
     renderer: &Renderer,
     fog: &FogData,
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
+    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    pipeline: Arc<dyn VulkanPipelineData>
 ) {
-    let pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
+    if !pipeline.has_fog() {
+        return;
+    }
 
     let fog_data = VulkanFogData {
         sky_fog_to: fog.distance_to,
@@ -732,7 +754,7 @@ fn upload_fog_uniform(
 
     let set = PersistentDescriptorSet::new(
         renderer.renderer.descriptor_set_allocator.as_ref(),
-        pipeline.layout().set_layouts()[2].clone(),
+        pipeline.get_pipeline().layout().set_layouts()[2].clone(),
         [
             WriteDescriptorSet::buffer(0, fog_uniform_buffer),
         ],
@@ -741,7 +763,7 @@ fn upload_fog_uniform(
 
     builder.bind_descriptor_sets(
         PipelineBindPoint::Graphics,
-        pipeline.layout().clone(),
+        pipeline.get_pipeline().layout().clone(),
         2,
         set
     ).unwrap();

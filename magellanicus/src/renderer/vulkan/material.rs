@@ -1,5 +1,6 @@
 mod simple_shader;
 mod shader_environment;
+mod shader_transparent_chicago;
 
 use crate::error::MResult;
 use crate::renderer::vulkan::material::simple_shader::VulkanSimpleShaderMaterial;
@@ -7,6 +8,8 @@ use crate::renderer::{AddShaderData, AddShaderParameter, Renderer};
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
 use crate::renderer::vulkan::material::shader_environment::VulkanShaderEnvironmentMaterial;
+use crate::renderer::vulkan::material::shader_transparent_chicago::VulkanShaderTransparentChicagoMaterial;
+use crate::renderer::vulkan::VulkanPipelineData;
 
 /// Material shader data
 ///
@@ -39,6 +42,10 @@ impl VulkanMaterialShaderData {
                 let shader = Arc::new(VulkanShaderEnvironmentMaterial::new(renderer, shader)?);
                 Ok(Self { pipeline_data: shader })
             }
+            AddShaderData::ShaderTransparentChicago(shader) => {
+                let shader = Arc::new(VulkanShaderTransparentChicagoMaterial::new(renderer, shader)?);
+                Ok(Self { pipeline_data: shader })
+            }
         }
     }
 }
@@ -64,4 +71,10 @@ pub trait VulkanMaterial: Send + Sync + 'static {
     fn is_transparent(&self) -> bool {
         false
     }
+
+    /// Get the main graphics pipeline that will be used for drawing.
+    fn get_main_pipeline(&self) -> Arc<dyn VulkanPipelineData>;
+
+    /// If `true`, this can reuse descriptors from a previous call.
+    fn can_reuse_descriptors(&self) -> bool;
 }

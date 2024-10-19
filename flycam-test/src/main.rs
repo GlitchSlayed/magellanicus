@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use magellanicus::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
+use magellanicus::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::path::Path;
@@ -12,7 +12,7 @@ use std::time::Instant;
 use clap::Parser;
 use glam::Vec3;
 use magellanicus::vertex::{LightmapVertex, ModelTriangle, ModelVertex};
-use ringhopper::definitions::{Bitmap, BitmapDataFormat, BitmapDataType, Scenario, ScenarioStructureBSP, ShaderEnvironment, ShaderModel, ShaderTransparentChicago, ShaderTransparentChicagoExtended, ShaderTransparentGeneric, ShaderTransparentGlass, ShaderTransparentMeter, Sky, UnicodeStringList};
+use ringhopper::definitions::{Bitmap, BitmapDataFormat, BitmapDataType, Scenario, ScenarioStructureBSP, ShaderEnvironment, ShaderModel, ShaderTransparentChicago, ShaderTransparentChicagoExtended, ShaderTransparentChicagoMap, ShaderTransparentGeneric, ShaderTransparentGlass, ShaderTransparentMeter, Sky, UnicodeStringList};
 use ringhopper::primitives::dynamic::DynamicTagDataArray;
 use ringhopper::primitives::engine::Engine;
 use ringhopper::primitives::primitive::{TagGroup, TagPath};
@@ -811,30 +811,22 @@ impl FlycamTestHandler {
             TagGroup::ShaderTransparentChicago => {
                 let tag = tag.get_ref::<ShaderTransparentChicago>().unwrap();
                 AddShaderParameter {
-                    data: AddShaderData::BasicShader(AddShaderBasicShaderData {
-                        bitmap: tag
-                            .maps
-                            .items
-                            .get(0)
-                            .and_then(|b| b.parameters.map.path())
-                            .map(|b| b.to_string()),
-                        shader_type: ShaderType::TransparentChicago,
-                        alpha_tested: true
+                    data: AddShaderData::ShaderTransparentChicago(AddShaderTransparentChicagoShaderData {
+                        two_sided: tag.properties.flags.two_sided,
+                        first_map_type: unsafe { transmute(tag.properties.first_map_type as u32) },
+                        framebuffer_method: unsafe { transmute(tag.properties.framebuffer_blend_function as u32) },
+                        maps: tag.maps.items.iter().map(chicago_map_to_magellanicus_chicago_map).collect()
                     })
                 }
             },
             TagGroup::ShaderTransparentChicagoExtended => {
                 let tag = tag.get_ref::<ShaderTransparentChicagoExtended>().unwrap();
                 AddShaderParameter {
-                    data: AddShaderData::BasicShader(AddShaderBasicShaderData {
-                        bitmap: tag
-                            ._4_stage_maps
-                            .items
-                            .get(0)
-                            .and_then(|b| b.parameters.map.path())
-                            .map(|b| b.to_string()),
-                        shader_type: ShaderType::TransparentChicago,
-                        alpha_tested: true
+                    data: AddShaderData::ShaderTransparentChicago(AddShaderTransparentChicagoShaderData {
+                        two_sided: tag.properties.flags.two_sided,
+                        first_map_type: unsafe { transmute(tag.properties.first_map_type as u32) },
+                        framebuffer_method: unsafe { transmute(tag.properties.framebuffer_blend_function as u32) },
+                        maps: tag._4_stage_maps.items.iter().map(chicago_map_to_magellanicus_chicago_map).collect()
                     })
                 }
             },
@@ -1196,6 +1188,17 @@ fn parse_resolution(resolution_string: String) -> Result<Resolution, String> {
         return Err(format!("Invalid resolution {resolution_string}; at least one dimension is zero"));
     }
     Ok(Resolution { width, height })
+}
+
+fn chicago_map_to_magellanicus_chicago_map(map: &ShaderTransparentChicagoMap) -> AddShaderTransparentChicagoShaderMap {
+    AddShaderTransparentChicagoShaderMap {
+        bitmap: map.parameters.map.path().map(|p| p.to_string()),
+        color_function: unsafe { transmute(map.color_function as u32) },
+        alpha_function: unsafe { transmute(map.alpha_function as u32) },
+        uv_scale: [map.parameters.map_u_scale as f32, map.parameters.map_v_scale as f32],
+        uv_offset: [map.parameters.map_u_offset as f32, map.parameters.map_v_offset as f32],
+        alpha_replicate: map.flags.alpha_replicate
+    }
 }
 
 #[inline(always)]
