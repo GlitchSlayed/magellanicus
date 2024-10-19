@@ -446,15 +446,16 @@ impl VulkanRenderer {
         let opaque = geo_shader_iterator.clone().filter(|s| !s.1.is_transparent());
         let transparent = geo_shader_iterator.clone().filter(|s| s.1.is_transparent());
 
-        upload_main_material_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj, command_builder);
+        let mvp = make_model_view_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj);
+        let fog = make_fog_uniform(renderer, &fog_data);
 
         // Draw non-transparent shaders first
         let mut last_shader = None;
         for (geometry, shader) in opaque {
-            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, &fog_data, shader);
+            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
         }
         for (geometry, shader) in transparent {
-            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, &fog_data, shader);
+            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
         }
 
         command_builder.end_rendering().expect("failed to end rendering inside viewport");
@@ -467,7 +468,8 @@ impl VulkanRenderer {
         camera: &Camera,
         last_shader: &'b mut Option<&'a Arc<String>>,
         geometry: &'a BSPGeometry,
-        fog_data: &FogData,
+        fog_data: Arc<PersistentDescriptorSet>,
+        mvp: Arc<PersistentDescriptorSet>,
         shader: &Arc<dyn VulkanMaterial>
     ) {
         let this_shader = &geometry.vulkan.shader;
@@ -493,7 +495,8 @@ impl VulkanRenderer {
                 .expect("tried to set cull mode back to Back");
         }
 
-        upload_fog_uniform(renderer, fog_data, &mut command_builder, main_pipeline.clone());
+        upload_main_material_uniform(&mut command_builder, main_pipeline.clone(), mvp.clone());
+        upload_fog_uniform(&mut command_builder, main_pipeline.clone(), fog_data.clone());
         upload_lightmap_descriptor_set(desired_lightmap, &currently_loaded_bsp, &mut command_builder, main_pipeline.clone());
 
         let index_buffer = geometry.vulkan.index_buffer.clone();
@@ -679,14 +682,77 @@ impl Default for FogData {
 }
 
 fn upload_main_material_uniform(
+    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    pipeline: Arc<dyn VulkanPipelineData>,
+    set: Arc<PersistentDescriptorSet>
+) {
+    builder.bind_descriptor_sets(
+        PipelineBindPoint::Graphics,
+        pipeline.get_pipeline().layout().clone(),
+        0,
+        set
+    ).unwrap();
+}
+
+fn upload_fog_uniform(
+    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    pipeline: Arc<dyn VulkanPipelineData>,
+    set: Arc<PersistentDescriptorSet>
+) {
+    if !pipeline.has_fog() {
+        return;
+    }
+
+    builder.bind_descriptor_sets(
+        PipelineBindPoint::Graphics,
+        pipeline.get_pipeline().layout().clone(),
+        2,
+        set
+    ).unwrap();
+}
+
+fn make_fog_uniform(
+    renderer: &Renderer,
+    fog: &FogData
+) -> Arc<PersistentDescriptorSet> {
+    let pipeline = renderer
+        .renderer
+        .pipelines[&VulkanPipelineType::ShaderEnvironment]
+        .get_pipeline();
+
+    let fog_data = VulkanFogData {
+        sky_fog_to: fog.distance_to,
+        sky_fog_from: fog.distance_from,
+        sky_fog_min_opacity: fog.min_opacity,
+        sky_fog_max_opacity: fog.max_opacity,
+        sky_fog_color: fog.color
+    };
+
+    let fog_uniform_buffer = Buffer::from_data(
+        renderer.renderer.memory_allocator.clone(),
+        BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
+        default_allocation_create_info(),
+        fog_data
+    ).unwrap();
+
+    PersistentDescriptorSet::new(
+        renderer.renderer.descriptor_set_allocator.as_ref(),
+        pipeline.layout().set_layouts()[2].clone(),
+        [
+            WriteDescriptorSet::buffer(0, fog_uniform_buffer),
+        ],
+        []
+    ).unwrap()
+}
+
+fn make_model_view_uniform(
     renderer: &Renderer,
     camera: Vec3,
     offset: Vec3,
     rotation: Mat3,
     view: Mat4,
     proj: Mat4,
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
-) {
+) -> Arc<PersistentDescriptorSet> {
     let pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
     let model = Mat4::IDENTITY;
 
@@ -710,63 +776,14 @@ fn upload_main_material_uniform(
         model_data
     ).unwrap();
 
-    let set = PersistentDescriptorSet::new(
+    PersistentDescriptorSet::new(
         renderer.renderer.descriptor_set_allocator.as_ref(),
         pipeline.layout().set_layouts()[0].clone(),
         [
             WriteDescriptorSet::buffer(0, model_uniform_buffer),
         ],
         []
-    ).unwrap();
-
-    builder.bind_descriptor_sets(
-        PipelineBindPoint::Graphics,
-        pipeline.layout().clone(),
-        0,
-        set
-    ).unwrap();
-}
-
-fn upload_fog_uniform(
-    renderer: &Renderer,
-    fog: &FogData,
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    pipeline: Arc<dyn VulkanPipelineData>
-) {
-    if !pipeline.has_fog() {
-        return;
-    }
-
-    let fog_data = VulkanFogData {
-        sky_fog_to: fog.distance_to,
-        sky_fog_from: fog.distance_from,
-        sky_fog_min_opacity: fog.min_opacity,
-        sky_fog_max_opacity: fog.max_opacity,
-        sky_fog_color: fog.color
-    };
-
-    let fog_uniform_buffer = Buffer::from_data(
-        renderer.renderer.memory_allocator.clone(),
-        BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
-        default_allocation_create_info(),
-        fog_data
-    ).unwrap();
-
-    let set = PersistentDescriptorSet::new(
-        renderer.renderer.descriptor_set_allocator.as_ref(),
-        pipeline.get_pipeline().layout().set_layouts()[2].clone(),
-        [
-            WriteDescriptorSet::buffer(0, fog_uniform_buffer),
-        ],
-        []
-    ).unwrap();
-
-    builder.bind_descriptor_sets(
-        PipelineBindPoint::Graphics,
-        pipeline.get_pipeline().layout().clone(),
-        2,
-        set
-    ).unwrap();
+    ).unwrap()
 }
 
 fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color: [f32; 4], command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) -> MResult<()> {
