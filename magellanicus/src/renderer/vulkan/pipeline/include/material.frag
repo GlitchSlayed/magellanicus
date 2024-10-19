@@ -18,5 +18,10 @@ vec3 apply_fog(float distance_from_camera, vec3 color) {
     float fog_density = interpolation * sky_fog_data.max_opacity;
     return mix(color, sky_fog_data.sky_fog_color.rgb, fog_density);
 }
+#endif
 
+#ifdef USE_TANGENT
+vec3 calculate_world_normal(vec3 base) {
+    return base.xxx * tangent + base.yyy * binormal + base.zzz * normal;
+}
 #endif

@@ -2,11 +2,6 @@
 
 #include "shader_environment_data.glsl"
 
-#define USE_FOG
-#define USE_LIGHTMAPS
-#include "../include/material.frag"
-#include "../include/blend.frag"
-
 layout(location = 0) out vec4 f_color;
 
 layout(location = 0) in vec2 base_map_texture_coordinates;
@@ -18,6 +13,12 @@ layout(location = 4) in vec3 normal;
 layout(location = 5) in vec3 binormal;
 layout(location = 6) in vec3 tangent;
 
+#define USE_FOG
+#define USE_LIGHTMAPS
+#define USE_TANGENT
+#include "../include/material.frag"
+#include "../include/blend.frag"
+
 layout(set = 3, binding = 1) uniform sampler map_sampler;
 layout(set = 3, binding = 2) uniform texture2D base_map;
 layout(set = 3, binding = 3) uniform texture2D primary_detail_map;
@@ -25,10 +26,6 @@ layout(set = 3, binding = 4) uniform texture2D secondary_detail_map;
 layout(set = 3, binding = 5) uniform texture2D micro_detail_map;
 layout(set = 3, binding = 6) uniform texture2D bump_map;
 layout(set = 3, binding = 7) uniform textureCube cubemap;
-
-vec3 calculate_world_tangent(vec3 base) {
-    return base.xxx * tangent + base.yyy * binormal + base.zzz * normal;
-}
 
 vec3 blend_with_mix_type(vec3 color, vec3 with, uint blend_type) {
     switch(blend_type) {
@@ -104,14 +101,14 @@ void main() {
             return;
     }
 
-    // Specular
+    // Specular (based on noclip.website - https://github.com/magcius/noclip.website)
     vec3 camera_normal = normalize(camera_difference);
-    float normal_on_camera = dot(normal, camera_normal);
-    vec3 reflection_tangent = calculate_world_tangent(vec3(0.0, 0.0, 1.0));
-    vec3 reflection_normal = normalize(2.0 * normal_on_camera * normal - camera_normal);
-    vec3 reflection_color = texture(samplerCube(cubemap, map_sampler), reflection_normal + vec3(bump_vector.xy, 0.0)).xyz;
+    vec3 world_normal = calculate_world_normal(bump_vector);
+    float tangent_on_camera = dot(world_normal, camera_normal);
+    vec3 reflection_normal = normalize(2.0 * tangent_on_camera * world_normal - camera_normal);
+    vec3 reflection_color = texture(samplerCube(cubemap, map_sampler), reflection_normal).xyz;
     vec3 specular_color = pow(reflection_color, vec3(8.0));
-    float diffuse_reflection = normal_on_camera * normal_on_camera;
+    float diffuse_reflection = tangent_on_camera * tangent_on_camera;
     float reflect_attenuation = mix(shader_environment_data.parallel_color.a, shader_environment_data.perpendicular_color.a, diffuse_reflection);
     vec3 specular = mix(shader_environment_data.parallel_color.rgb, shader_environment_data.perpendicular_color.rgb, diffuse_reflection);
     specular = mix(specular_color, reflection_color, specular);
