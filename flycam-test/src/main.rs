@@ -396,7 +396,7 @@ fn main() -> Result<(), String> {
 
                 if keycode == Some(Keycode::LShift) {
                     let increased = f32::from_bits(handler.camera_velocity[0][3].load(Ordering::Relaxed)) + shift_speedup;
-                    println!("Camera #{viewport_mod} speed: {}x", camera_multiplier(increased));
+                    println!("Camera #{viewport_mod} speed: {}/s", camera_multiplier(increased));
                     handler.camera_velocity[viewport_mod][3].swap(increased.to_bits(), Ordering::Relaxed);
                 }
             }
@@ -421,7 +421,7 @@ fn main() -> Result<(), String> {
 
                 if keycode == Some(Keycode::LShift) {
                     let reduced = f32::from_bits(handler.camera_velocity[viewport_mod][3].load(Ordering::Relaxed)) - shift_speedup;
-                    println!("Camera #{viewport_mod} speed: {}x", camera_multiplier(reduced));
+                    println!("Camera #{viewport_mod} speed: {}/s", camera_multiplier(reduced));
                     handler.camera_velocity[viewport_mod][3].swap(reduced.to_bits(), Ordering::Relaxed);
                 }
             }
@@ -449,7 +449,14 @@ fn main() -> Result<(), String> {
 
                 let mut multiplier = f32::from_bits(handler.camera_velocity[viewport_mod][3].load(Ordering::Relaxed));
 
-                multiplier += (incrementor as f32) * 0.25;
+                let increment_multiplier = if cfg!(target_os = "macos") {
+                    0.25
+                }
+                else {
+                    1.0
+                };
+
+                multiplier += (incrementor as f32) * increment_multiplier;
 
                 let mut min = -20.0;
                 let mut max = 24.0;
@@ -461,7 +468,7 @@ fn main() -> Result<(), String> {
 
                 multiplier = multiplier.clamp(min, max);
 
-                println!("Camera #{viewport_mod} speed: {}x", camera_multiplier(multiplier));
+                println!("Camera #{viewport_mod} speed: {}/s", camera_multiplier(multiplier));
 
                 handler.camera_velocity[viewport_mod][3].swap(multiplier.to_bits(), Ordering::Relaxed);
             }
