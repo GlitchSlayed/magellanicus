@@ -426,7 +426,7 @@ fn main() -> Result<(), String> {
                 }
             }
             Event::MouseWheel { x, y, .. } => {
-                let incrementor = if x.abs() > y.abs() {
+                let mut incrementor = if x.abs() > y.abs() {
                     x
                 }
                 else {
@@ -450,11 +450,18 @@ fn main() -> Result<(), String> {
                 let mut multiplier = f32::from_bits(handler.camera_velocity[viewport_mod][3].load(Ordering::Relaxed));
 
                 let increment_multiplier = if cfg!(target_os = "macos") {
+                    // macOS has scroll wheel acceleration
                     0.25
                 }
                 else {
                     1.0
                 };
+
+                if cfg!(target_os = "macos") && x.abs() == incrementor.abs() {
+                    // if you hold shift, x is set, and this is inverted on macOS regardless of the
+                    // natural scrolling setting
+                    incrementor *= -1;
+                }
 
                 multiplier += (incrementor as f32) * increment_multiplier;
 
