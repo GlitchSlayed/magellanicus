@@ -28,15 +28,15 @@ use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec::Vec;
-use std::{eprintln, format, vec};
+use std::{eprintln, format, println, vec};
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, ClearDepthStencilImageInfo, CommandBufferInheritanceInfo, CommandBufferInheritanceRenderPassType, CommandBufferInheritanceRenderingInfo, CommandBufferUsage, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderingAttachmentInfo, RenderingInfo, ResolveImageInfo, SecondaryAutoCommandBuffer};
 use vulkano::descriptor_set::allocator::{StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo};
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
-use vulkano::device::{Device, Queue};
+use vulkano::device::{Device, DeviceOwned, Queue};
 use vulkano::format::{ClearDepthStencilValue, Format};
-use vulkano::image::sampler::{Sampler, SamplerCreateInfo};
+use vulkano::image::sampler::{Filter, Sampler, SamplerCreateInfo};
 use vulkano::image::view::ImageView;
 use vulkano::image::{Image, ImageCreateInfo, ImageType, ImageUsage, SampleCount};
 use vulkano::instance::Instance;
@@ -141,7 +141,7 @@ impl VulkanRenderer {
         let (swapchain, swapchain_images) = build_swapchain(device.clone(), surface.clone(), output_format, renderer_parameters)?;
 
         let pipelines = load_all_pipelines(device.clone(), samples_per_pixel)?;
-        let swapchain_image_views = Self::make_swapchain_images(swapchain_images, memory_allocator.clone(), samples_per_pixel);
+        let swapchain_image_views = Self::make_swapchain_images(swapchain_images, memory_allocator.clone(), samples_per_pixel, renderer_parameters.render_scale);
 
         let default_2d_sampler = Sampler::new(
             device.clone(),
@@ -191,55 +191,71 @@ impl VulkanRenderer {
         )?;
 
         self.swapchain = swapchain;
-        self.swapchain_image_views = Self::make_swapchain_images(swapchain_images, self.memory_allocator.clone(), self.samples_per_pixel);
+        self.swapchain_image_views = Self::make_swapchain_images(swapchain_images, self.memory_allocator.clone(), self.samples_per_pixel, renderer_parameters.render_scale);
         self.current_resolution = renderer_parameters.resolution;
 
         Ok(())
     }
 
-    fn make_swapchain_images(swapchain_images: Vec<Arc<Image>>, memory_allocator: Arc<StandardMemoryAllocator>, samples_per_pixel: SampleCount) -> Vec<SwapchainImages> {
-        swapchain_images.iter().map(|i| SwapchainImages {
-            output: ImageView::new_default(i.clone()).unwrap(),
-            color: ImageView::new_default(Image::new(
-                memory_allocator.clone(),
-                ImageCreateInfo {
-                    extent: i.extent(),
-                    format: OFFLINE_PIPELINE_COLOR_FORMAT,
-                    image_type: ImageType::Dim2d,
-                    samples: samples_per_pixel,
-                    usage: ImageUsage::TRANSFER_SRC | ImageUsage::COLOR_ATTACHMENT,
-                    ..Default::default()
-                },
-                AllocationCreateInfo::default(),
-            ).unwrap()).unwrap(),
-            depth: ImageView::new_default(Image::new(
-                memory_allocator.clone(),
-                ImageCreateInfo {
-                    extent: i.extent(),
-                    format: Format::D32_SFLOAT,
-                    image_type: ImageType::Dim2d,
-                    samples: samples_per_pixel,
-                    usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSFER_DST,
-                    ..Default::default()
-                },
-                AllocationCreateInfo::default(),
-            ).unwrap()).unwrap(),
-            resolve: if samples_per_pixel != SampleCount::Sample1 {
-                Some(ImageView::new_default(Image::new(
+    fn make_swapchain_images(swapchain_images: Vec<Arc<Image>>, memory_allocator: Arc<StandardMemoryAllocator>, samples_per_pixel: SampleCount, render_scale: f32) -> Vec<SwapchainImages> {
+        assert!(render_scale > 0.0);
+
+        swapchain_images.iter().map(|i| {
+            let mut width = i.extent()[0];
+            let mut height = i.extent()[1];
+
+            if render_scale != 1.0 {
+                let max_width = memory_allocator.device().physical_device().properties().max_framebuffer_width;
+                let max_height = memory_allocator.device().physical_device().properties().max_framebuffer_height;
+                width = (((width as f32) * render_scale.sqrt()) as u32).clamp(1, max_width);
+                height = (((height as f32) * render_scale.sqrt()) as u32).clamp(1, max_height);
+
+                println!("Render resolution: {width}x{height}");
+            }
+
+            SwapchainImages {
+                output: ImageView::new_default(i.clone()).unwrap(),
+                color: ImageView::new_default(Image::new(
                     memory_allocator.clone(),
                     ImageCreateInfo {
-                        extent: i.extent(),
+                        extent: [width, height, 1],
                         format: OFFLINE_PIPELINE_COLOR_FORMAT,
                         image_type: ImageType::Dim2d,
-                        samples: SampleCount::Sample1,
-                        usage: ImageUsage::TRANSFER_SRC | ImageUsage::TRANSFER_DST | ImageUsage::COLOR_ATTACHMENT,
+                        samples: samples_per_pixel,
+                        usage: ImageUsage::TRANSFER_SRC | ImageUsage::COLOR_ATTACHMENT,
                         ..Default::default()
                     },
                     AllocationCreateInfo::default(),
-                ).unwrap()).unwrap())
-            } else {
-                None
-            },
+                ).unwrap()).unwrap(),
+                depth: ImageView::new_default(Image::new(
+                    memory_allocator.clone(),
+                    ImageCreateInfo {
+                        extent: [width, height, 1],
+                        format: Format::D32_SFLOAT,
+                        image_type: ImageType::Dim2d,
+                        samples: samples_per_pixel,
+                        usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSFER_DST,
+                        ..Default::default()
+                    },
+                    AllocationCreateInfo::default(),
+                ).unwrap()).unwrap(),
+                resolve: if samples_per_pixel != SampleCount::Sample1 {
+                    Some(ImageView::new_default(Image::new(
+                        memory_allocator.clone(),
+                        ImageCreateInfo {
+                            extent: [width, height, 1],
+                            format: OFFLINE_PIPELINE_COLOR_FORMAT,
+                            image_type: ImageType::Dim2d,
+                            samples: SampleCount::Sample1,
+                            usage: ImageUsage::TRANSFER_SRC | ImageUsage::TRANSFER_DST | ImageUsage::COLOR_ATTACHMENT,
+                            ..Default::default()
+                        },
+                        AllocationCreateInfo::default(),
+                    ).unwrap()).unwrap())
+                } else {
+                    None
+                },
+            }
         }).collect()
     }
 
@@ -260,7 +276,8 @@ impl VulkanRenderer {
         image_future.wait(Some(Duration::from_millis(5000))).expect("waited too long");
         renderer.renderer.future.as_mut().unwrap().cleanup_finished();
 
-        let (width, height) = (renderer.renderer.current_resolution.width as f32, renderer.renderer.current_resolution.height as f32);
+        let [width, height, ..] = images.color.image().extent();
+        let (width, height) = (width as f32, height as f32);
 
         command_builder.clear_depth_stencil_image(ClearDepthStencilImageInfo {
             clear_value: ClearDepthStencilValue::from(1.0),
@@ -315,7 +332,10 @@ impl VulkanRenderer {
             images.color.image()
         };
 
-        command_builder.blit_image(BlitImageInfo::images(staging_image.clone(), images.output.image().clone())).unwrap();
+        command_builder.blit_image(BlitImageInfo {
+            filter: Filter::Linear,
+            ..BlitImageInfo::images(staging_image.clone(), images.output.image().clone())
+        }).unwrap();
 
         let commands = command_builder.build().expect("failed to build command builder");
 

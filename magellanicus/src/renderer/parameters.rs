@@ -34,7 +34,10 @@ pub struct RendererParameters {
     pub msaa: MSAA,
 
     /// Anisotropic filtering.
-    pub anisotropic_filtering: Option<f32>
+    pub anisotropic_filtering: Option<f32>,
+
+    /// Render scaling
+    pub render_scale: f32,
 }
 
 #[derive(Copy, Clone, PartialEq, Default)]
@@ -56,7 +59,8 @@ impl Default for RendererParameters {
             number_of_viewports: 1,
             vsync: false,
             msaa: Default::default(),
-            anisotropic_filtering: None
+            anisotropic_filtering: None,
+            render_scale: 1.0
         }
     }
 }

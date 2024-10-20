@@ -85,7 +85,11 @@ struct Arguments {
 
     /// Use exclusive fullscreen mode.
     #[arg(long = "fullscreen", short = 'F')]
-    pub fullscreen: bool
+    pub fullscreen: bool,
+
+    /// Set the render scaling.
+    #[arg(long = "render-scale", short = 'S', default_value = "1.0")]
+    pub render_scale: f32
 
 }
 
@@ -107,8 +111,13 @@ fn main() -> Result<(), String> {
         msaa,
         vsync,
         resolution,
-        fullscreen
+        fullscreen,
+        render_scale
     } = Arguments::parse();
+
+    if render_scale <= 0.0 || render_scale > 65535.0 {
+        return Err(format!("invalid render scale {render_scale}"));
+    }
 
     let sdl = sdl2::init()?;
     let mut events = sdl.event_pump()?;
@@ -224,7 +233,8 @@ fn main() -> Result<(), String> {
                 number_of_viewports: viewports,
                 vsync,
                 anisotropic_filtering,
-                msaa
+                msaa,
+                render_scale
             })
         }.unwrap();
 
