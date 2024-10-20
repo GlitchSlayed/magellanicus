@@ -992,9 +992,10 @@ impl FlycamTestHandler {
 
                 for (material_index, material) in lightmap.materials.items.iter().enumerate() {
                     let Some(shader_path) = material.shader.path() else {
-                        continue
+                        return Err(format!("Missing shader reference in material #{material_index} of lightmap #{lightmap_index}"))
                     };
 
+                    let centroid = [material.centroid.x as f32, material.centroid.y as f32, material.centroid.z as f32];
                     let surfaces: usize = material.surfaces.try_into().unwrap();
                     let surface_count: usize = material.surface_count.try_into().unwrap();
 
@@ -1041,7 +1042,8 @@ impl FlycamTestHandler {
                         shader_vertices,
                         lightmap_vertices: (!lightmap.is_empty()).then_some(lightmap),
                         surfaces: indices,
-                        shader: shader_path.to_native_path()
+                        shader: shader_path.to_native_path(),
+                        centroid
                     });
                 }
                 add_bsp.lightmap_sets.push(add_lightmap);

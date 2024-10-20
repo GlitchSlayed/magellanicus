@@ -248,8 +248,7 @@ impl VulkanRenderer {
             .current_bsp
             .as_ref()
             .and_then(|f| renderer.bsps.get(f))
-            .expect("no BSP loaded")
-            .clone();
+            .map(|b| b.clone());
 
         let mut command_builder = AutoCommandBufferBuilder::primary(
             &renderer.renderer.command_buffer_allocator,
@@ -364,7 +363,7 @@ impl VulkanRenderer {
         color_view: Arc<ImageView>,
         depth_view: Arc<ImageView>,
         viewport: Viewport,
-        currently_loaded_bsp: &BSP,
+        currently_loaded_bsp: &Option<Arc<BSP>>,
         command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         camera: Camera
     ) {
@@ -384,45 +383,52 @@ impl VulkanRenderer {
         }).expect("failed to begin rendering inside viewport w/out sky color");
 
         let aspect_ratio = viewport.extent[0] / viewport.extent[1];
-
-        let cluster_index = currently_loaded_bsp.bsp_data.find_cluster(camera.position);
-        let cluster = cluster_index.map(|c| &currently_loaded_bsp.bsp_data.clusters[c]);
-        let sky = cluster.and_then(|c| c.sky.as_ref()).and_then(|s| renderer.skies.get(s));
-
         let z_near = 0.0625;
-        let mut z_far = currently_loaded_bsp.draw_distance;
+
         let fog_data;
-        if !camera.fog || sky.is_none() {
-            fog_data = FogData::default();
+        let mut z_far;
+        if let Some(bsp) = currently_loaded_bsp {
+            let cluster_index = bsp.bsp_data.find_cluster(camera.position);
+            let cluster = cluster_index.map(|c| &bsp.bsp_data.clusters[c]);
+            let sky = cluster.and_then(|c| c.sky.as_ref()).and_then(|s| renderer.skies.get(s));
+
+            z_far = bsp.draw_distance;
+            if !camera.fog || sky.is_none() {
+                fog_data = FogData::default();
+            }
+            else {
+                let sky = sky.unwrap();
+
+                // TODO: determine which fog color
+                fog_data = FogData {
+                    color: [sky.outdoor_fog_color[0], sky.outdoor_fog_color[1], sky.outdoor_fog_color[2], 0.0],
+                    distance_from: sky.outdoor_fog_start_distance,
+                    distance_to: sky.outdoor_fog_opaque_distance,
+                    min_opacity: 0.0,
+                    max_opacity: sky.outdoor_fog_maximum_density,
+                };
+
+                // Occlude things that won't be visible anyway
+                if fog_data.max_opacity == 1.0 {
+                    z_far = z_far.min(fog_data.distance_to);
+                }
+            }
+
+            let sky_color = [fog_data.color[0], fog_data.color[1], fog_data.color[2], 1.0];
+            draw_box(
+                renderer,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                sky_color,
+                command_builder
+            ).unwrap();
         }
         else {
-            let sky = sky.unwrap();
-
-            // TODO: determine which fog color
-            fog_data = FogData {
-                color: [sky.outdoor_fog_color[0], sky.outdoor_fog_color[1], sky.outdoor_fog_color[2], 0.0],
-                distance_from: sky.outdoor_fog_start_distance,
-                distance_to: sky.outdoor_fog_opaque_distance,
-                min_opacity: 0.0,
-                max_opacity: sky.outdoor_fog_maximum_density,
-            };
-
-            // Occlude things that won't be visible anyway
-            if fog_data.max_opacity == 1.0 {
-                z_far = z_far.min(fog_data.distance_to);
-            }
+            z_far = 2250.0;
+            fog_data = FogData::default();
         }
-
-        let sky_color = [fog_data.color[0], fog_data.color[1], fog_data.color[2], 1.0];
-        draw_box(
-            renderer,
-            0.0,
-            0.0,
-            1.0,
-            1.0,
-            sky_color,
-            command_builder
-        ).unwrap();
 
         z_far = z_far.max(z_near + 1.0);
         let proj = Mat4::perspective_lh(
@@ -437,25 +443,45 @@ impl VulkanRenderer {
             Vec3::new(0.0, 0.0, -1.0)
         );
 
-        let geo_shader_iterator = currently_loaded_bsp
-            .geometry_indices_sorted_by_material
-            .iter()
-            .map(|g| &currently_loaded_bsp.geometries[*g])
-            .map(|g| (g, &renderer.shaders.get(&g.vulkan.shader).expect("no shader?").vulkan.pipeline_data));
-
-        let opaque = geo_shader_iterator.clone().filter(|s| !s.1.is_transparent());
-        let transparent = geo_shader_iterator.clone().filter(|s| s.1.is_transparent());
-
-        let mvp = make_model_view_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj);
         let fog = make_fog_uniform(renderer, &fog_data);
 
-        // Draw non-transparent shaders first
-        let mut last_shader = None;
-        for (geometry, shader) in opaque {
-            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
-        }
-        for (geometry, shader) in transparent {
-            Self::draw_bsp_geometry(renderer, currently_loaded_bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
+        let mut transparent_geometries: Vec<(usize, f32)> = Vec::with_capacity(256);
+
+        if let Some(bsp) = currently_loaded_bsp {
+            let mvp = make_model_view_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj);
+
+            // Draw non-transparent shaders first
+            let mut last_shader = None;
+
+            let get_geometry_shader = |f: &usize| (&bsp.geometries[*f], &renderer.shaders[&bsp.geometries[*f].vulkan.shader].vulkan.pipeline_data);
+
+            for (geometry, shader) in bsp
+                .vulkan
+                .opaque_geometries
+                .iter()
+                .map(get_geometry_shader) {
+                Self::draw_bsp_geometry(renderer, bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
+            }
+
+            transparent_geometries.extend(bsp
+                .vulkan
+                .transparent_geometries
+                .iter()
+                .map(|i| (*i, Vec3::from(camera.position).distance_squared(Vec3::from(bsp.geometries[*i].centroid))))
+            );
+            transparent_geometries
+                .sort_by(|a,b| b.1.total_cmp(&a.1));
+
+            for (geometry, shader) in transparent_geometries
+                .iter()
+                .map(|b| &b.0)
+                .map(get_geometry_shader) {
+                if geometry.vulkan.shader.ends_with("water") {
+                    // FIXME: water is not yet supported and the fallback shader is broken for it; should be fixed later
+                    continue;
+                }
+                Self::draw_bsp_geometry(renderer, bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
+            }
         }
 
         command_builder.end_rendering().expect("failed to end rendering inside viewport");

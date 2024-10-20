@@ -73,7 +73,8 @@ impl BSP {
                 vulkan: VulkanBSPGeometryData::new(renderer, &add_bsp_parameter, data.material_data, data.lightmap_bitmap_index)?,
                 lightmap_index: data.material_data.lightmap_vertices.as_ref().and(data.lightmap_bitmap_index),
                 material_reflexive_index: data.material_reflexive_index,
-                lightmap_reflexive_index: data.lightmap_reflexive_index
+                lightmap_reflexive_index: data.lightmap_reflexive_index,
+                centroid: data.material_data.centroid
             })
         }
 
@@ -151,7 +152,7 @@ impl BSP {
             so_many_vectors.push(surface_ranges_filtered);
         }
 
-        let vulkan = VulkanBSPData::new(renderer, &add_bsp_parameter, &so_many_vectors)?;
+        let vulkan = VulkanBSPData::new(renderer, &add_bsp_parameter, &so_many_vectors, &geometries)?;
 
         Ok(Self { vulkan, geometries, bsp_data: add_bsp_parameter.bsp_data, cluster_surfaces, draw_distance, geometry_indices_sorted_by_material })
     }
@@ -160,6 +161,7 @@ impl BSP {
 pub struct BSPGeometry {
     pub vulkan: VulkanBSPGeometryData,
     pub lightmap_index: Option<usize>,
+    pub centroid: [f32; 3],
 
     pub material_reflexive_index: usize,
     pub lightmap_reflexive_index: usize

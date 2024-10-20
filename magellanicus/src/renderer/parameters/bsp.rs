@@ -47,7 +47,10 @@ pub struct AddBSPParameterLightmapMaterial {
     pub surfaces: Vec<ModelTriangle>,
 
     /// Describes the pipeline used for material.
-    pub shader: String
+    pub shader: String,
+
+    /// Describes the center point of the material.
+    pub centroid: [f32; 3]
 }
 
 impl AddBSPParameter {

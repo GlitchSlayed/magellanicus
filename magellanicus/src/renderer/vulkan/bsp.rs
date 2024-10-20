@@ -13,15 +13,24 @@ use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::image::sampler::{Sampler, SamplerAddressMode, SamplerCreateInfo};
 use vulkano::image::view::{ImageView, ImageViewCreateInfo};
 use vulkano::pipeline::Pipeline;
+use crate::renderer::data::BSPGeometry;
 
 pub struct VulkanBSPData {
     pub lightmap_images: BTreeMap<usize, Arc<PersistentDescriptorSet>>,
     pub cluster_surface_index_buffers: Vec<Vec<Vec<Option<Subbuffer<[u16]>>>>>,
-    pub null_lightmaps: Arc<PersistentDescriptorSet>
+    pub null_lightmaps: Arc<PersistentDescriptorSet>,
+
+    pub transparent_geometries: Vec<usize>,
+    pub opaque_geometries: Vec<usize>,
 }
 
 impl VulkanBSPData {
-    pub fn new(renderer: &mut Renderer, param: &AddBSPParameter, surfaces_ranges: &Vec<Vec<Vec<Vec<ModelTriangle>>>>) -> MResult<Self> {
+    pub fn new(
+        renderer: &mut Renderer,
+        param: &AddBSPParameter,
+        surfaces_ranges: &Vec<Vec<Vec<Vec<ModelTriangle>>>>,
+        geometries: &Vec<BSPGeometry>
+    ) -> MResult<Self> {
         let shader_environment_pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
         let mut images = BTreeMap::new();
         if let Some(n) = &param.lightmap_bitmap {
@@ -110,7 +119,30 @@ impl VulkanBSPData {
             []
         ).unwrap();
 
-        Ok(Self { lightmap_images: images, cluster_surface_index_buffers, null_lightmaps: null_set })
+        let mut transparent_geometries: Vec<usize> = geometries
+            .iter()
+            .enumerate()
+            .filter_map(|f| if renderer.shaders[&f.1.vulkan.shader].vulkan.pipeline_data.is_transparent() {
+                Some(f.0)
+            }
+            else {
+                None
+            }).collect();
+
+        let mut opaque_geometries: Vec<usize> = geometries
+            .iter()
+            .enumerate()
+            .filter_map(|f| if !renderer.shaders[&f.1.vulkan.shader].vulkan.pipeline_data.is_transparent() {
+                Some(f.0)
+            }
+            else {
+                None
+            }).collect();
+
+        transparent_geometries.sort_by(|a,b| geometries[*a].vulkan.shader.cmp(&geometries[*b].vulkan.shader));
+        opaque_geometries.sort_by(|a,b| geometries[*a].vulkan.shader.cmp(&geometries[*b].vulkan.shader));
+
+        Ok(Self { lightmap_images: images, cluster_surface_index_buffers, null_lightmaps: null_set, opaque_geometries, transparent_geometries })
     }
 }
 
