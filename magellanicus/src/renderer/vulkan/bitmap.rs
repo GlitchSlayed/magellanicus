@@ -32,15 +32,29 @@ impl VulkanBitmapData {
             BitmapFormat::DXT5 => (parameter.format, Format::BC3_UNORM_BLOCK, &parameter.data),
             BitmapFormat::BC7 => (parameter.format, Format::BC7_UNORM_BLOCK, &parameter.data),
 
-            // TODO: VERIFY
             BitmapFormat::A8R8G8B8 => (parameter.format, Format::B8G8R8A8_UNORM, &parameter.data),
             BitmapFormat::X8R8G8B8 => (parameter.format, Format::B8G8R8A8_UNORM, &parameter.data),
             BitmapFormat::R5G6B5 => (parameter.format, Format::R5G6B5_UNORM_PACK16, &parameter.data),
             BitmapFormat::A1R5G5B5 => (parameter.format, Format::A1R5G5B5_UNORM_PACK16, &parameter.data),
-            BitmapFormat::A4R4G4B4 => (parameter.format, Format::A4R4G4B4_UNORM_PACK16, &parameter.data),
+            BitmapFormat::B4G4R4A4 => (parameter.format, Format::B4G4R4A4_UNORM_PACK16, &parameter.data),
+            BitmapFormat::A4R4G4B4 => {
+                if vulkan_renderer.device.enabled_extensions().ext_4444_formats {
+                    (parameter.format, Format::A4R4G4B4_UNORM_PACK16, &parameter.data)
+                }
+                else {
+                    transcoded_pixels.reserve_exact(parameter.data.len());
+                    for color in parameter.data.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap())) {
+                        let b = color & 0b1111;
+                        let g = (color >> 4) & 0b1111;
+                        let r = (color >> 8) & 0b1111;
+                        let a = (color >> 12) & 0b1111;
+                        let bgra = ((r << 4) | a) | (((b << 4) | g) << 8);
+                        transcoded_pixels.extend_from_slice(&bgra.to_le_bytes());
+                    }
+                    (BitmapFormat::B4G4R4A4, Format::B4G4R4A4_UNORM_PACK16, &transcoded_pixels)
+                }
+            },
             BitmapFormat::R32G32B32A32SFloat => (parameter.format, Format::R32G32B32A32_SFLOAT, &parameter.data),
-
-            // TODO: VERIFY ALL OF THE MONOCHROME MEMES
 
             BitmapFormat::A8 => {
                 transcoded_pixels.reserve_exact(parameter.data.len() * 4);

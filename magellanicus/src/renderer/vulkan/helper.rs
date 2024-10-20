@@ -2,6 +2,7 @@ use crate::error::{Error, MResult};
 use crate::renderer::RendererParameters;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::string::ToString;
+use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::vec::Vec;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
@@ -26,21 +27,31 @@ pub unsafe fn load_vulkan_and_get_queue(
     let library = VulkanLibrary::new()?;
 
     let enabled_extensions = Surface::required_extensions(surface);
-    let device_extensions_13 = DeviceExtensions {
+    let device_extensions_all = DeviceExtensions {
+        // Non-negotiable; required to do swapchains
         khr_swapchain: true,
         ..DeviceExtensions::empty()
     };
 
     let device_extensions_12 = DeviceExtensions {
+        // Required for splitscreen without making extra pipelines
         khr_dynamic_rendering: true,
-        ext_4444_formats: true,
+
+        // Non-negotiable; required for two_sided flag without making extra pipelines
         ext_extended_dynamic_state: true,
-        ..device_extensions_13
+        ..device_extensions_all
     }.clone();
 
     let required_device_features = Features {
         sampler_anisotropy: anisotropic_filtering.is_some(),
         ..Features::empty()
+    };
+
+    let optional_extensions_all = DeviceExtensions::empty();
+
+    let optional_extensions_12 = DeviceExtensions {
+        ext_4444_formats: true,
+        ..optional_extensions_all
     };
 
     let instance = Instance::new(library.clone(), InstanceCreateInfo {
@@ -53,7 +64,9 @@ pub unsafe fn load_vulkan_and_get_queue(
     let (physical_device, queue_family_index, device_extensions) = find_best_gpu(
         instance.clone(),
         device_extensions_12,
-        device_extensions_13,
+        device_extensions_all,
+        optional_extensions_12,
+        optional_extensions_all,
         required_device_features,
         surface.clone()
     ).ok_or_else(|| Error::from_vulkan_error("No suitable Vulkan-compatible GPUs found".to_string()))?;
@@ -129,6 +142,8 @@ fn find_best_gpu(
     instance: Arc<Instance>,
     device_extensions_12: DeviceExtensions,
     device_extensions_13: DeviceExtensions,
+    optional_extensions_12: DeviceExtensions,
+    optional_extensions_13: DeviceExtensions,
     required_device_features: Features,
     surface: Arc<Surface>
 ) -> Option<(Arc<PhysicalDevice>, u32, DeviceExtensions)> {
@@ -137,17 +152,18 @@ fn find_best_gpu(
         .unwrap()
         .filter(|device| device.supported_features().contains(&required_device_features))
         .filter_map(|device| {
+            let supported_extensions = device.supported_extensions().to_owned();
             if device.api_version() >= Version::V1_3 {
-                if device.supported_extensions().contains(&device_extensions_13) {
-                    Some((device, device_extensions_13))
+                if supported_extensions.contains(&device_extensions_13) {
+                    Some((device, device_extensions_13 | (supported_extensions & optional_extensions_13)))
                 }
                 else {
                     None
                 }
             }
             else if device.api_version() >= Version::V1_2 {
-                if device.supported_extensions().contains(&device_extensions_12) {
-                    Some((device, device_extensions_12))
+                if supported_extensions.contains(&device_extensions_12) {
+                    Some((device, device_extensions_12 | (supported_extensions & optional_extensions_12)))
                 }
                 else {
                     None

@@ -156,7 +156,8 @@ pub enum BitmapFormat {
     A8Y8,
     P8,
 
-    R32G32B32A32SFloat
+    R32G32B32A32SFloat,
+    B4G4R4A4,
 }
 impl BitmapFormat {
     pub fn block_pixel_length(self) -> usize {
@@ -170,6 +171,7 @@ impl BitmapFormat {
             Self::R5G6B5 => 1,
             Self::A1R5G5B5 => 1,
             Self::A4R4G4B4 => 1,
+            Self::B4G4R4A4 => 1,
             Self::A8 => 1,
             Self::Y8 => 1,
             Self::AY8 => 1,
@@ -190,6 +192,7 @@ impl BitmapFormat {
             Self::R5G6B5 => 2,
             Self::A1R5G5B5 => 2,
             Self::A4R4G4B4 => 2,
+            Self::B4G4R4A4 => 2,
             Self::A8 => 1,
             Self::Y8 => 1,
             Self::AY8 => 1,
