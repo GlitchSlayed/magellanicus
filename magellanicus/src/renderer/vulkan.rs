@@ -244,17 +244,31 @@ impl VulkanRenderer {
         let device = memory_allocator.device();
 
         swapchain_images.iter().map(|i| {
-            let mut width = i.extent()[0];
-            let mut height = i.extent()[1];
+            let native_width = i.extent()[0];
+            let native_height = i.extent()[1];
 
+            let width;
+            let height;
             if render_scale != 1.0 {
                 let max_width = device.physical_device().properties().max_framebuffer_width;
                 let max_height = device.physical_device().properties().max_framebuffer_height;
-                width = (((width as f32) * render_scale.sqrt()) as u32).clamp(1, max_width);
-                height = (((height as f32) * render_scale.sqrt()) as u32).clamp(1, max_height);
 
-                println!("Render resolution: {width}x{height}");
+                let attempted_width = ((native_width as f32) * render_scale.sqrt()) as u32;
+                let attempted_height = ((native_height as f32) * render_scale.sqrt()) as u32;
+
+                width = attempted_width.clamp(1, max_width);
+                height = attempted_height.clamp(1, max_height);
+
+                if width != attempted_width || height != attempted_height {
+                    eprintln!("Resolution {attempted_width}x{attempted_height} is not supported by the GPU... resizing");
+                }
             }
+            else {
+                width = native_width;
+                height = native_height;
+            }
+
+            println!("Render resolution: {width}x{height} ({native_width}x{native_height}x{:.02}%)", render_scale * 100.0);
 
             let output = ImageView::new_default(i.clone()).unwrap();
             let color = ImageView::new_default(Image::new(
