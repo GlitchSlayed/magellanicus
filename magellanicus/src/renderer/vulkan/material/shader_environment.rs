@@ -1,5 +1,5 @@
 use crate::error::MResult;
-use crate::renderer::vulkan::{default_allocation_create_info, VulkanMaterial, VulkanPipelineData, VulkanPipelineType};
+use crate::renderer::vulkan::{default_allocation_create_info, VulkanMaterial, VulkanPipelineType};
 use crate::renderer::{AddShaderEnvironmentShaderData, DefaultType, Renderer};
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
@@ -9,7 +9,6 @@ use vulkano::image::view::{ImageView, ImageViewCreateInfo, ImageViewType};
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 
 pub struct VulkanShaderEnvironmentMaterial {
-    pipeline: Arc<dyn VulkanPipelineData>,
     descriptor_set: Arc<PersistentDescriptorSet>
 }
 
@@ -112,7 +111,6 @@ impl VulkanShaderEnvironmentMaterial {
         )?;
 
         let shader_data = Self {
-            pipeline,
             descriptor_set
         };
 
@@ -123,17 +121,16 @@ impl VulkanShaderEnvironmentMaterial {
 impl VulkanMaterial for VulkanShaderEnvironmentMaterial {
     fn generate_commands(
         &self,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         index_count: u32,
         repeat_shader: bool,
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
         if !repeat_shader {
-            let pipeline = self.pipeline.get_pipeline();
-            to.bind_pipeline_graphics(pipeline.clone())?;
+            let pipeline = renderer.renderer.pipelines.get(&self.get_main_pipeline()).unwrap();
             to.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                pipeline.layout().clone(),
+                pipeline.get_pipeline().layout().clone(),
                 3,
                 self.descriptor_set.clone()
             )?;
@@ -142,8 +139,8 @@ impl VulkanMaterial for VulkanShaderEnvironmentMaterial {
         Ok(())
     }
 
-    fn get_main_pipeline(&self) -> Arc<dyn VulkanPipelineData> {
-        self.pipeline.clone()
+    fn get_main_pipeline(&self) -> VulkanPipelineType {
+        VulkanPipelineType::ShaderEnvironment
     }
 
     fn can_reuse_descriptors(&self) -> bool {

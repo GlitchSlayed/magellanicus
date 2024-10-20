@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
 use crate::renderer::vulkan::material::shader_environment::VulkanShaderEnvironmentMaterial;
 use crate::renderer::vulkan::material::shader_transparent_chicago::VulkanShaderTransparentChicagoMaterial;
-use crate::renderer::vulkan::VulkanPipelineData;
+use crate::renderer::vulkan::VulkanPipelineType;
 
 /// Material shader data
 ///
@@ -73,7 +73,7 @@ pub trait VulkanMaterial: Send + Sync + 'static {
     }
 
     /// Get the main graphics pipeline that will be used for drawing.
-    fn get_main_pipeline(&self) -> Arc<dyn VulkanPipelineData>;
+    fn get_main_pipeline(&self) -> VulkanPipelineType;
 
     /// If `true`, this can reuse descriptors from a previous call.
     fn can_reuse_descriptors(&self) -> bool;

@@ -12,11 +12,12 @@ use vulkano::pipeline::graphics::multisample::MultisampleState;
 use vulkano::pipeline::graphics::rasterization::{FrontFace, RasterizationState};
 use vulkano::pipeline::graphics::subpass::PipelineRenderingCreateInfo;
 use vulkano::pipeline::graphics::vertex_input::{VertexBufferDescription, VertexDefinition};
-use vulkano::pipeline::graphics::viewport::ViewportState;
+use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
 use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vulkano::pipeline::{DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo};
-use crate::renderer::vulkan::OFFLINE_PIPELINE_COLOR_FORMAT;
+use vulkano::render_pass::Subpass;
+use crate::renderer::vulkan::{SwapchainImages, OFFLINE_PIPELINE_COLOR_FORMAT};
 
 #[derive(Copy, Clone, Default, PartialEq)]
 pub enum DepthAccess {
@@ -79,6 +80,7 @@ impl Default for PipelineSettings {
 }
 
 pub fn load_pipeline(
+    swapchain_images: &SwapchainImages,
     device: Arc<Device>,
     load_vertex_shader: fn (Arc<Device>) -> Result<Arc<vulkano::shader::ShaderModule>, vulkano::Validated<vulkano::VulkanError>>,
     load_fragment_shader: fn (Arc<Device>) -> Result<Arc<vulkano::shader::ShaderModule>, vulkano::Validated<vulkano::VulkanError>>,
@@ -107,14 +109,8 @@ pub fn load_pipeline(
             .unwrap(),
     )?;
 
-    let subpass = PipelineRenderingCreateInfo {
-        color_attachment_formats: vec![Some(settings.format)],
-        depth_attachment_format: Some(Format::D32_SFLOAT),
-        ..Default::default()
-    };
-
     let blend = ColorBlendState::with_attachment_states(
-        subpass.color_attachment_formats.len() as u32,
+        1,
         settings.color_blend_attachment_state.clone(),
     );
 
@@ -125,7 +121,19 @@ pub fn load_pipeline(
             stages: stages.into_iter().collect(),
             vertex_input_state: Some(vertex_input_state),
             input_assembly_state: Some(InputAssemblyState::default()),
-            viewport_state: Some(ViewportState::default()),
+            viewport_state: Some(if let Some(fb) = swapchain_images.framebuffer.as_ref() {
+                ViewportState {
+                    viewports: [Viewport {
+                        offset: [0.0, 0.0],
+                        extent: [fb.extent()[0] as f32, fb.extent()[1] as f32],
+                        depth_range: 0.0..=1.0,
+                    }].into(),
+                    ..ViewportState::default()
+                }
+            }
+            else {
+                ViewportState::default()
+            }),
             rasterization_state: Some(RasterizationState {
                 front_face: FrontFace::Clockwise,
                 ..RasterizationState::default()
@@ -151,7 +159,17 @@ pub fn load_pipeline(
                 }),
                 ..DepthStencilState::default()
             }),
-            subpass: Some(subpass.into()),
+            subpass: Some(if let Some(fb) = swapchain_images.framebuffer.as_ref() {
+                Subpass::from(fb.render_pass().clone(), 0).unwrap().into()
+            }
+            else {
+                let create_info = PipelineRenderingCreateInfo {
+                    color_attachment_formats: vec![Some(settings.format)],
+                    depth_attachment_format: Some(swapchain_images.depth.format()),
+                    ..Default::default()
+                };
+                create_info.into()
+            }),
 
             ..GraphicsPipelineCreateInfo::layout(layout)
         }

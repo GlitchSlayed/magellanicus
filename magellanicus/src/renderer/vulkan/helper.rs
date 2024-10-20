@@ -34,9 +34,6 @@ pub unsafe fn load_vulkan_and_get_queue(
     };
 
     let device_extensions_12 = DeviceExtensions {
-        // Required for splitscreen without making extra pipelines
-        khr_dynamic_rendering: true,
-
         // Non-negotiable; required for two_sided flag without making extra pipelines
         ext_extended_dynamic_state: true,
         ..device_extensions_all
@@ -51,6 +48,7 @@ pub unsafe fn load_vulkan_and_get_queue(
 
     let optional_extensions_12 = DeviceExtensions {
         ext_4444_formats: true,
+        khr_dynamic_rendering: true,
         ..optional_extensions_all
     };
 
@@ -91,7 +89,7 @@ fn create_device_and_queues(physical_device: Arc<PhysicalDevice>, device_extensi
                 ..Default::default()
             }],
             enabled_features: Features {
-                dynamic_rendering: true,
+                dynamic_rendering: device_extensions.khr_dynamic_rendering,
                 extended_dynamic_state: true,
                 sampler_anisotropy: true,
                 ..Features::default()

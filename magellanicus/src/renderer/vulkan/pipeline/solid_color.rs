@@ -1,11 +1,10 @@
 use crate::error::MResult;
 use crate::renderer::vulkan::pipeline::pipeline_loader::{load_pipeline, DepthAccess, PipelineSettings};
 use crate::renderer::vulkan::vertex::VulkanModelVertex;
-use crate::renderer::vulkan::VulkanPipelineData;
+use crate::renderer::vulkan::{SwapchainImages, VulkanPipelineData};
 use alloc::sync::Arc;
 use std::vec;
 use vulkano::device::Device;
-use vulkano::image::SampleCount;
 use vulkano::pipeline::graphics::color_blend::ColorBlendAttachmentState;
 use vulkano::pipeline::graphics::vertex_input::Vertex;
 use vulkano::pipeline::GraphicsPipeline;
@@ -29,12 +28,12 @@ pub struct SolidColorShader {
 }
 
 impl SolidColorShader {
-    pub fn new(device: Arc<Device>, samples: SampleCount) -> MResult<Self> {
-        let pipeline = load_pipeline(device, vertex::load, fragment::load, &PipelineSettings {
+    pub fn new(swapchain_images: &SwapchainImages, device: Arc<Device>) -> MResult<Self> {
+        let pipeline = load_pipeline(swapchain_images, device, vertex::load, fragment::load, &PipelineSettings {
             depth_access: DepthAccess::DepthWrite,
             vertex_buffer_descriptions: vec![VulkanModelVertex::per_vertex()],
             color_blend_attachment_state: ColorBlendAttachmentState::default(),
-            samples,
+            samples: swapchain_images.color.image().samples(),
             ..Default::default()
         })?;
 

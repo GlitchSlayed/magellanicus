@@ -31,7 +31,7 @@ use std::vec::Vec;
 use std::{eprintln, format, println, vec};
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, ClearDepthStencilImageInfo, CommandBufferInheritanceInfo, CommandBufferInheritanceRenderPassType, CommandBufferInheritanceRenderingInfo, CommandBufferUsage, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderingAttachmentInfo, RenderingInfo, ResolveImageInfo, SecondaryAutoCommandBuffer};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, ClearDepthStencilImageInfo, CommandBufferInheritanceInfo, CommandBufferInheritanceRenderPassType, CommandBufferInheritanceRenderingInfo, CommandBufferUsage, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderPassBeginInfo, RenderingAttachmentInfo, RenderingInfo, ResolveImageInfo, SecondaryAutoCommandBuffer, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
 use vulkano::descriptor_set::allocator::{StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo};
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::device::{Device, DeviceOwned, Queue};
@@ -45,10 +45,10 @@ use vulkano::padded::Padded;
 use vulkano::pipeline::graphics::rasterization::CullMode;
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
-use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp};
+use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp, Framebuffer, FramebufferCreateInfo};
 use vulkano::swapchain::{acquire_next_image, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
-use vulkano::{Validated, ValidationError, VulkanError};
+use vulkano::{single_pass_renderpass, Validated, ValidationError, VulkanError};
 
 pub(crate) static OFFLINE_PIPELINE_COLOR_FORMAT: Format = Format::R8G8B8A8_UNORM;
 
@@ -64,17 +64,57 @@ pub struct VulkanRenderer {
     pipelines: BTreeMap<VulkanPipelineType, Arc<dyn VulkanPipelineData>>,
     swapchain: Arc<Swapchain>,
     surface: Arc<Surface>,
-    swapchain_image_views: Vec<SwapchainImages>,
+    swapchain_image_views: Vec<Arc<SwapchainImages>>,
     default_2d_sampler: Arc<Sampler>,
     samples_per_pixel: SampleCount
 }
 
 #[derive(Clone)]
-struct SwapchainImages {
-    pub output: Arc<ImageView>,
-    pub color: Arc<ImageView>,
-    pub depth: Arc<ImageView>,
-    pub resolve: Option<Arc<ImageView>>,
+pub struct SwapchainImages {
+    output: Arc<ImageView>,
+    color: Arc<ImageView>,
+    depth: Arc<ImageView>,
+    resolve: Option<Arc<ImageView>>,
+    framebuffer: Option<Arc<Framebuffer>>
+}
+
+impl SwapchainImages {
+    fn begin_rendering(&self, command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) {
+        if let Some(n) = self.framebuffer.as_ref() {
+            let begin_render_pass = RenderPassBeginInfo {
+                clear_values: vec![None, None],
+                ..RenderPassBeginInfo::framebuffer(n.clone())
+            };
+            let begin_subpass = SubpassBeginInfo {
+                contents: SubpassContents::Inline,
+                ..Default::default()
+            };
+            command_builder.begin_render_pass(begin_render_pass, begin_subpass).expect("failed to begin render pass");
+        }
+        else {
+            command_builder.begin_rendering(RenderingInfo {
+                color_attachments: vec![Some(RenderingAttachmentInfo {
+                    load_op: AttachmentLoadOp::Load,
+                    store_op: AttachmentStoreOp::Store,
+                    ..RenderingAttachmentInfo::image_view(self.color.clone())
+                })],
+                depth_attachment: Some(RenderingAttachmentInfo {
+                    load_op: AttachmentLoadOp::Load,
+                    store_op: AttachmentStoreOp::Store,
+                    ..RenderingAttachmentInfo::image_view(self.depth.clone())
+                }),
+                ..Default::default()
+            }).expect("failed to begin rendering");
+        }
+    }
+    fn end_rendering(&self, command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) {
+        if self.framebuffer.is_some() {
+            command_builder.end_render_pass(SubpassEndInfo::default()).expect("failed to end render pass");
+        }
+        else {
+            command_builder.end_rendering().expect("failed to end rendering");
+        }
+    }
 }
 
 impl VulkanRenderer {
@@ -140,8 +180,8 @@ impl VulkanRenderer {
 
         let (swapchain, swapchain_images) = build_swapchain(device.clone(), surface.clone(), output_format, renderer_parameters)?;
 
-        let pipelines = load_all_pipelines(device.clone(), samples_per_pixel)?;
         let swapchain_image_views = Self::make_swapchain_images(swapchain_images, memory_allocator.clone(), samples_per_pixel, renderer_parameters.render_scale);
+        let pipelines = load_all_pipelines(&swapchain_image_views[0], device.clone())?;
 
         let default_2d_sampler = Sampler::new(
             device.clone(),
@@ -193,69 +233,122 @@ impl VulkanRenderer {
         self.swapchain = swapchain;
         self.swapchain_image_views = Self::make_swapchain_images(swapchain_images, self.memory_allocator.clone(), self.samples_per_pixel, renderer_parameters.render_scale);
         self.current_resolution = renderer_parameters.resolution;
+        self.pipelines = load_all_pipelines(&self.swapchain_image_views[0], self.device.clone()).expect("failed to reload pipelines...");
 
         Ok(())
     }
 
-    fn make_swapchain_images(swapchain_images: Vec<Arc<Image>>, memory_allocator: Arc<StandardMemoryAllocator>, samples_per_pixel: SampleCount, render_scale: f32) -> Vec<SwapchainImages> {
+    fn make_swapchain_images(swapchain_images: Vec<Arc<Image>>, memory_allocator: Arc<StandardMemoryAllocator>, samples_per_pixel: SampleCount, render_scale: f32) -> Vec<Arc<SwapchainImages>> {
         assert!(render_scale > 0.0);
+
+        let device = memory_allocator.device();
 
         swapchain_images.iter().map(|i| {
             let mut width = i.extent()[0];
             let mut height = i.extent()[1];
 
             if render_scale != 1.0 {
-                let max_width = memory_allocator.device().physical_device().properties().max_framebuffer_width;
-                let max_height = memory_allocator.device().physical_device().properties().max_framebuffer_height;
+                let max_width = device.physical_device().properties().max_framebuffer_width;
+                let max_height = device.physical_device().properties().max_framebuffer_height;
                 width = (((width as f32) * render_scale.sqrt()) as u32).clamp(1, max_width);
                 height = (((height as f32) * render_scale.sqrt()) as u32).clamp(1, max_height);
 
                 println!("Render resolution: {width}x{height}");
             }
 
-            SwapchainImages {
-                output: ImageView::new_default(i.clone()).unwrap(),
-                color: ImageView::new_default(Image::new(
+            let output = ImageView::new_default(i.clone()).unwrap();
+            let color = ImageView::new_default(Image::new(
+                memory_allocator.clone(),
+                ImageCreateInfo {
+                    extent: [width, height, 1],
+                    format: OFFLINE_PIPELINE_COLOR_FORMAT,
+                    image_type: ImageType::Dim2d,
+                    samples: samples_per_pixel,
+                    usage: ImageUsage::TRANSFER_SRC | ImageUsage::COLOR_ATTACHMENT,
+                    ..Default::default()
+                },
+                AllocationCreateInfo::default(),
+            ).unwrap()).unwrap();
+
+            let depth = ImageView::new_default(Image::new(
+                memory_allocator.clone(),
+                ImageCreateInfo {
+                    extent: [width, height, 1],
+                    format: Format::D32_SFLOAT,
+                    image_type: ImageType::Dim2d,
+                    samples: samples_per_pixel,
+                    usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSFER_DST,
+                    ..Default::default()
+                },
+                AllocationCreateInfo::default(),
+            ).unwrap()).unwrap();
+
+            let resolve = if samples_per_pixel != SampleCount::Sample1 {
+                Some(ImageView::new_default(Image::new(
                     memory_allocator.clone(),
                     ImageCreateInfo {
                         extent: [width, height, 1],
                         format: OFFLINE_PIPELINE_COLOR_FORMAT,
                         image_type: ImageType::Dim2d,
-                        samples: samples_per_pixel,
-                        usage: ImageUsage::TRANSFER_SRC | ImageUsage::COLOR_ATTACHMENT,
+                        samples: SampleCount::Sample1,
+                        usage: ImageUsage::TRANSFER_SRC | ImageUsage::TRANSFER_DST | ImageUsage::COLOR_ATTACHMENT,
                         ..Default::default()
                     },
                     AllocationCreateInfo::default(),
-                ).unwrap()).unwrap(),
-                depth: ImageView::new_default(Image::new(
-                    memory_allocator.clone(),
-                    ImageCreateInfo {
-                        extent: [width, height, 1],
-                        format: Format::D32_SFLOAT,
-                        image_type: ImageType::Dim2d,
-                        samples: samples_per_pixel,
-                        usage: ImageUsage::DEPTH_STENCIL_ATTACHMENT | ImageUsage::TRANSFER_DST,
-                        ..Default::default()
-                    },
-                    AllocationCreateInfo::default(),
-                ).unwrap()).unwrap(),
-                resolve: if samples_per_pixel != SampleCount::Sample1 {
-                    Some(ImageView::new_default(Image::new(
-                        memory_allocator.clone(),
-                        ImageCreateInfo {
-                            extent: [width, height, 1],
-                            format: OFFLINE_PIPELINE_COLOR_FORMAT,
-                            image_type: ImageType::Dim2d,
-                            samples: SampleCount::Sample1,
-                            usage: ImageUsage::TRANSFER_SRC | ImageUsage::TRANSFER_DST | ImageUsage::COLOR_ATTACHMENT,
-                            ..Default::default()
+                ).unwrap()).unwrap())
+            } else {
+                None
+            };
+
+            let framebuffer = if !device.enabled_extensions().khr_dynamic_rendering {
+                let color_format = color.image().format();
+                let depth_format = depth.image().format();
+                let samples = color.image().samples();
+
+                let render_pass = single_pass_renderpass!(
+                    device.clone(),
+                    attachments: {
+                        color: {
+                            format: color_format,
+                            samples: samples,
+                            load_op: Load,
+                            store_op: Store,
                         },
-                        AllocationCreateInfo::default(),
-                    ).unwrap()).unwrap())
-                } else {
-                    None
-                },
+                        depth_stencil: {
+                            format: depth_format,
+                            samples: samples,
+                            load_op: Load,
+                            store_op: DontCare,
+                        }
+                    },
+                    pass: {
+                        color: [color],
+                        depth_stencil: {depth_stencil},
+                    },
+                ).expect("failed to make render pass");
+
+                let framebuffer = Framebuffer::new(render_pass, FramebufferCreateInfo {
+                    attachments: vec![
+                        color.clone(),
+                        depth.clone()
+                    ],
+                    extent: [width, height],
+                    ..Default::default()
+                }).expect("failed to make framebuffer");
+
+                Some(framebuffer)
             }
+            else {
+                None
+            };
+
+            Arc::new(SwapchainImages {
+                output,
+                color,
+                depth,
+                resolve,
+                framebuffer
+            })
         }).collect()
     }
 
@@ -295,8 +388,7 @@ impl VulkanRenderer {
 
             Self::draw_viewport(
                 renderer,
-                images.color.clone(),
-                images.depth.clone(),
+                &images,
                 viewport,
                 &currently_loaded_bsp,
                 &mut command_builder,
@@ -305,21 +397,9 @@ impl VulkanRenderer {
         }
 
         if renderer.player_viewports.len() > 1 {
-            command_builder.begin_rendering(RenderingInfo {
-                color_attachments: vec![Some(RenderingAttachmentInfo {
-                    load_op: AttachmentLoadOp::Load,
-                    store_op: AttachmentStoreOp::Store,
-                    ..RenderingAttachmentInfo::image_view(images.color.clone())
-                })],
-                depth_attachment: Some(RenderingAttachmentInfo {
-                    load_op: AttachmentLoadOp::Load,
-                    store_op: AttachmentStoreOp::Store,
-                    ..RenderingAttachmentInfo::image_view(images.depth.clone())
-                }),
-                ..Default::default()
-            }).expect("failed to begin rendering for split screen bars");
+            images.begin_rendering(&mut command_builder);
             Self::draw_split_screen_bars(renderer, &mut command_builder, width, height);
-            command_builder.end_rendering().expect("failed to end rendering");
+            images.end_rendering(&mut command_builder);
         }
 
         let staging_image = if let Some(resolved_color_view) = images.resolve.as_ref().map(|iv| iv.image()) {
@@ -380,27 +460,14 @@ impl VulkanRenderer {
 
     fn draw_viewport(
         renderer: &mut Renderer,
-        color_view: Arc<ImageView>,
-        depth_view: Arc<ImageView>,
+        images: &Arc<SwapchainImages>,
         viewport: Viewport,
         currently_loaded_bsp: &Option<Arc<BSP>>,
         command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         camera: Camera
     ) {
         command_builder.set_viewport(0, [viewport.clone()].into_iter().collect()).unwrap();
-        command_builder.begin_rendering(RenderingInfo {
-            color_attachments: vec![Some(RenderingAttachmentInfo {
-                load_op: AttachmentLoadOp::Load,
-                store_op: AttachmentStoreOp::Store,
-                ..RenderingAttachmentInfo::image_view(color_view.clone())
-            })],
-            depth_attachment: Some(RenderingAttachmentInfo {
-                load_op: AttachmentLoadOp::Load,
-                store_op: AttachmentStoreOp::Store,
-                ..RenderingAttachmentInfo::image_view(depth_view.clone())
-            }),
-            ..Default::default()
-        }).expect("failed to begin rendering inside viewport w/out sky color");
+        images.begin_rendering(command_builder);
 
         let aspect_ratio = viewport.extent[0] / viewport.extent[1];
         let z_near = 0.0625;
@@ -504,7 +571,7 @@ impl VulkanRenderer {
             }
         }
 
-        command_builder.end_rendering().expect("failed to end rendering inside viewport");
+        images.end_rendering(command_builder);
     }
 
     fn draw_bsp_geometry<'a, 'b>(
@@ -527,7 +594,7 @@ impl VulkanRenderer {
         };
         *last_shader = Some(this_shader);
 
-        let main_pipeline = shader.get_main_pipeline();
+        let main_pipeline = renderer.renderer.pipelines.get(&shader.get_main_pipeline()).unwrap();
         let mut desired_lightmap = geometry.lightmap_index;
         if !camera.lightmaps {
             desired_lightmap = None;

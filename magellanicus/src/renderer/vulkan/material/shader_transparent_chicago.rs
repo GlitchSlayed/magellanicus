@@ -1,5 +1,5 @@
 use crate::error::MResult;
-use crate::renderer::vulkan::{default_allocation_create_info, VulkanMaterial, VulkanPipelineData, VulkanPipelineType};
+use crate::renderer::vulkan::{default_allocation_create_info, VulkanMaterial, VulkanPipelineType};
 use crate::renderer::{AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, DefaultType, Renderer, ShaderTransparentChicagoFirstMapType, ShaderTransparentChicagoFramebufferFunction};
 use std::sync::Arc;
 use std::borrow::ToOwned;
@@ -11,7 +11,7 @@ use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::pipeline::graphics::rasterization::CullMode;
 
 pub struct VulkanShaderTransparentChicagoMaterial {
-    pipeline: Arc<dyn VulkanPipelineData>,
+    pipeline: VulkanPipelineType,
     descriptor_set: Arc<PersistentDescriptorSet>,
     two_sided: bool
 }
@@ -99,25 +99,20 @@ impl VulkanShaderTransparentChicagoMaterial {
 
         let map_sampler = renderer.renderer.default_2d_sampler.clone();
 
-        let pipeline = renderer
-            .renderer
-            .pipelines[
-                match add_shader_parameter.framebuffer_method {
-                    ShaderTransparentChicagoFramebufferFunction::Add => &VulkanPipelineType::ShaderTransparentChicagoAdd,
-                    ShaderTransparentChicagoFramebufferFunction::AlphaBlend => &VulkanPipelineType::ShaderTransparentChicagoAlphaBlend,
-                    ShaderTransparentChicagoFramebufferFunction::Multiply => &VulkanPipelineType::ShaderTransparentChicagoMultiply,
-                    ShaderTransparentChicagoFramebufferFunction::DoubleMultiply => &VulkanPipelineType::ShaderTransparentChicagoMultiply, // FIXME
-                    ShaderTransparentChicagoFramebufferFunction::Subtract => &VulkanPipelineType::ShaderTransparentChicagoSubtract,
-                    ShaderTransparentChicagoFramebufferFunction::ComponentMin => &VulkanPipelineType::ShaderTransparentChicagoComponentMin,
-                    ShaderTransparentChicagoFramebufferFunction::ComponentMax => &VulkanPipelineType::ShaderTransparentChicagoComponentMax,
-                    ShaderTransparentChicagoFramebufferFunction::AlphaMultiplyAdd => &VulkanPipelineType::ShaderTransparentChicagoAlphaBlend // FIXME
-                }
-            ]
-            .clone();
+        let pipeline = match add_shader_parameter.framebuffer_method {
+            ShaderTransparentChicagoFramebufferFunction::Add => VulkanPipelineType::ShaderTransparentChicagoAdd,
+            ShaderTransparentChicagoFramebufferFunction::AlphaBlend => VulkanPipelineType::ShaderTransparentChicagoAlphaBlend,
+            ShaderTransparentChicagoFramebufferFunction::Multiply => VulkanPipelineType::ShaderTransparentChicagoMultiply,
+            ShaderTransparentChicagoFramebufferFunction::DoubleMultiply => VulkanPipelineType::ShaderTransparentChicagoMultiply, // FIXME
+            ShaderTransparentChicagoFramebufferFunction::Subtract => VulkanPipelineType::ShaderTransparentChicagoSubtract,
+            ShaderTransparentChicagoFramebufferFunction::ComponentMin => VulkanPipelineType::ShaderTransparentChicagoComponentMin,
+            ShaderTransparentChicagoFramebufferFunction::ComponentMax => VulkanPipelineType::ShaderTransparentChicagoComponentMax,
+            ShaderTransparentChicagoFramebufferFunction::AlphaMultiplyAdd => VulkanPipelineType::ShaderTransparentChicagoAlphaBlend // FIXME
+        };
 
         let descriptor_set = PersistentDescriptorSet::new(
             renderer.renderer.descriptor_set_allocator.as_ref(),
-            pipeline.get_pipeline().layout().set_layouts()[3].clone(),
+            renderer.renderer.pipelines[&pipeline].get_pipeline().layout().set_layouts()[3].clone(),
             [
                 WriteDescriptorSet::buffer(0, uniform_buffer),
                 WriteDescriptorSet::sampler(1, map_sampler),
@@ -143,15 +138,16 @@ impl VulkanShaderTransparentChicagoMaterial {
 impl VulkanMaterial for VulkanShaderTransparentChicagoMaterial {
     fn generate_commands(
         &self,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         index_count: u32,
         repeat_shader: bool,
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
         if !repeat_shader {
+            let pipeline = renderer.renderer.pipelines[&self.get_main_pipeline()].clone();
             to.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.pipeline.get_pipeline().layout().clone(),
+                pipeline.get_pipeline().layout().clone(),
                 3,
                 self.descriptor_set.clone()
             )?;
@@ -167,8 +163,8 @@ impl VulkanMaterial for VulkanShaderTransparentChicagoMaterial {
         true
     }
 
-    fn get_main_pipeline(&self) -> Arc<dyn VulkanPipelineData> {
-        self.pipeline.clone()
+    fn get_main_pipeline(&self) -> VulkanPipelineType {
+        self.pipeline
     }
 
     fn can_reuse_descriptors(&self) -> bool {

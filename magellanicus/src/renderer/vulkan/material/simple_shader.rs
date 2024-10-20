@@ -1,5 +1,5 @@
 use crate::error::MResult;
-use crate::renderer::vulkan::{VulkanMaterial, VulkanPipelineData, VulkanPipelineType};
+use crate::renderer::vulkan::{VulkanMaterial, VulkanPipelineType};
 use crate::renderer::{AddShaderBasicShaderData, DefaultType, Renderer};
 use std::eprintln;
 use std::sync::Arc;
@@ -13,7 +13,6 @@ use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 pub struct VulkanSimpleShaderMaterial {
     diffuse: Arc<ImageView>,
     diffuse_sampler: Arc<Sampler>,
-    pipeline: Arc<dyn VulkanPipelineData>,
     descriptor_set: Arc<PersistentDescriptorSet>
 }
 
@@ -44,7 +43,8 @@ impl VulkanSimpleShaderMaterial {
         })?;
 
         let diffuse_sampler = renderer.renderer.default_2d_sampler.clone();
-        let pipeline = renderer.renderer.pipelines[&VulkanPipelineType::SimpleTexture].clone();
+
+        let pipeline = renderer.renderer.pipelines.get(&VulkanPipelineType::SimpleTexture).unwrap();
 
         let descriptor_set = PersistentDescriptorSet::new(
             renderer.renderer.descriptor_set_allocator.as_ref(),
@@ -56,24 +56,23 @@ impl VulkanSimpleShaderMaterial {
             []
         )?;
 
-        Ok(Self { diffuse, diffuse_sampler, pipeline, descriptor_set })
+        Ok(Self { diffuse, diffuse_sampler, descriptor_set })
     }
 }
 
 impl VulkanMaterial for VulkanSimpleShaderMaterial {
     fn generate_commands(
         &self,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         index_count: u32,
         repeat_shader: bool,
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
         if !repeat_shader {
-            let pipeline = self.pipeline.get_pipeline();
-            to.bind_pipeline_graphics(pipeline.clone())?;
+            let pipeline = renderer.renderer.pipelines.get(&self.get_main_pipeline()).unwrap();
             to.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                pipeline.layout().clone(),
+                pipeline.get_pipeline().layout().clone(),
                 3,
                 self.descriptor_set.clone()
             )?;
@@ -86,8 +85,8 @@ impl VulkanMaterial for VulkanSimpleShaderMaterial {
         true
     }
 
-    fn get_main_pipeline(&self) -> Arc<dyn VulkanPipelineData> {
-        self.pipeline.clone()
+    fn get_main_pipeline(&self) -> VulkanPipelineType {
+        VulkanPipelineType::SimpleTexture
     }
 
     fn can_reuse_descriptors(&self) -> bool {

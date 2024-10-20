@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use vulkano::device::Device;
-use vulkano::image::SampleCount;
 use vulkano::pipeline::graphics::color_blend::{AttachmentBlend, BlendFactor, BlendOp};
 use vulkano::pipeline::GraphicsPipeline;
 use crate::error::MResult;
+use crate::renderer::vulkan::SwapchainImages;
 
 pub mod solid_color;
 pub mod simple_texture;
@@ -19,13 +19,13 @@ pub trait VulkanPipelineData: Send + Sync + 'static {
     fn has_fog(&self) -> bool;
 }
 
-pub fn load_all_pipelines(device: Arc<Device>, samples: SampleCount) -> MResult<BTreeMap<VulkanPipelineType, Arc<dyn VulkanPipelineData>>> {
+pub fn load_all_pipelines(swapchain_images: &SwapchainImages, device: Arc<Device>) -> MResult<BTreeMap<VulkanPipelineType, Arc<dyn VulkanPipelineData>>> {
     let mut pipelines: BTreeMap<VulkanPipelineType, Arc<dyn VulkanPipelineData>> = BTreeMap::new();
 
-    pipelines.insert(VulkanPipelineType::SolidColor, Arc::new(solid_color::SolidColorShader::new(device.clone(), samples)?));
-    pipelines.insert(VulkanPipelineType::SimpleTexture, Arc::new(simple_texture::SimpleTextureShader::new(device.clone(), samples)?));
-    pipelines.insert(VulkanPipelineType::ColorBox, Arc::new(color_box::ColorBox::new(device.clone(), samples)?));
-    pipelines.insert(VulkanPipelineType::ShaderEnvironment, Arc::new(shader_environment::ShaderEnvironment::new(device.clone(), samples)?));
+    pipelines.insert(VulkanPipelineType::SolidColor, Arc::new(solid_color::SolidColorShader::new(swapchain_images, device.clone())?));
+    pipelines.insert(VulkanPipelineType::SimpleTexture, Arc::new(simple_texture::SimpleTextureShader::new(swapchain_images, device.clone())?));
+    pipelines.insert(VulkanPipelineType::ColorBox, Arc::new(color_box::ColorBox::new(swapchain_images, device.clone())?));
+    pipelines.insert(VulkanPipelineType::ShaderEnvironment, Arc::new(shader_environment::ShaderEnvironment::new(swapchain_images, device.clone())?));
 
     let add = AttachmentBlend::additive();
     let alpha_blend = AttachmentBlend::alpha();
@@ -62,18 +62,17 @@ pub fn load_all_pipelines(device: Arc<Device>, samples: SampleCount) -> MResult<
         alpha_blend_op: BlendOp::Add,
     };
 
-    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoAdd, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(add))?));
-    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoAlphaBlend, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(alpha_blend))?));
-    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoSubtract, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(subtract))?));
-    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMin, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(component_min))?));
-    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMax, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(component_max))?));
-    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoMultiply, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(device.clone(), samples, Some(multiply))?));
-
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoAdd, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(add))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoAlphaBlend, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(alpha_blend))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoSubtract, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(subtract))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMin, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(component_min))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMax, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(component_max))?));
+    pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoMultiply, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(multiply))?));
 
     Ok(pipelines)
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum VulkanPipelineType {
     /// Writes a solid color.
