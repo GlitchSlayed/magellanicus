@@ -9,6 +9,7 @@ use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::image::view::{ImageView, ImageViewCreateInfo, ImageViewType};
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::pipeline::graphics::rasterization::CullMode;
+use crate::vertex::VertexOffsets;
 
 pub struct VulkanShaderTransparentChicagoMaterial {
     pipeline: VulkanPipelineType,
@@ -139,7 +140,7 @@ impl VulkanMaterial for VulkanShaderTransparentChicagoMaterial {
     fn generate_commands(
         &self,
         renderer: &Renderer,
-        index_count: u32,
+        vertices: &VertexOffsets,
         repeat_shader: bool,
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
@@ -155,7 +156,7 @@ impl VulkanMaterial for VulkanShaderTransparentChicagoMaterial {
                 to.set_cull_mode(CullMode::None)?;
             }
         }
-        to.draw_indexed(index_count, 1, 0, 0, 0)?;
+        vertices.make_vulkan_draw_command(to)?;
         Ok(())
     }
 

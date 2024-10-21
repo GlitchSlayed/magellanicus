@@ -3,13 +3,14 @@ mod shader_environment;
 mod shader_transparent_chicago;
 
 use crate::error::MResult;
+use crate::renderer::vulkan::material::shader_environment::VulkanShaderEnvironmentMaterial;
+use crate::renderer::vulkan::material::shader_transparent_chicago::VulkanShaderTransparentChicagoMaterial;
 use crate::renderer::vulkan::material::simple_shader::VulkanSimpleShaderMaterial;
+use crate::renderer::vulkan::VulkanPipelineType;
 use crate::renderer::{AddShaderData, AddShaderParameter, Renderer};
 use std::sync::Arc;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
-use crate::renderer::vulkan::material::shader_environment::VulkanShaderEnvironmentMaterial;
-use crate::renderer::vulkan::material::shader_transparent_chicago::VulkanShaderTransparentChicagoMaterial;
-use crate::renderer::vulkan::VulkanPipelineType;
+use crate::vertex::VertexOffsets;
 
 /// Material shader data
 ///
@@ -28,7 +29,7 @@ use crate::renderer::vulkan::VulkanPipelineType;
 /// Nothing will be bound on layout 1+. Anything on set 2+ is shader-specific.
 
 pub struct VulkanMaterialShaderData {
-    pub pipeline_data: Arc<dyn VulkanMaterial>
+    pub pipeline_data: Arc<dyn VulkanMaterial>,
 }
 
 impl VulkanMaterialShaderData {
@@ -50,6 +51,13 @@ impl VulkanMaterialShaderData {
     }
 }
 
+impl VertexOffsets {
+    pub fn make_vulkan_draw_command(&self, to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) -> MResult<()> {
+        to.draw_indexed(self.index_count, 1, self.index_offset, self.vertex_offset, 0)?;
+        Ok(())
+    }
+}
+
 pub trait VulkanMaterial: Send + Sync + 'static {
     /// Generate rendering commands.
     ///
@@ -58,9 +66,9 @@ pub trait VulkanMaterial: Send + Sync + 'static {
     fn generate_commands(
         &self,
         renderer: &Renderer,
-        index_count: u32,
+        vertices: &VertexOffsets,
         repeat_shader: bool,
-        to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
+        to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
     ) -> MResult<()>;
 
     /// Return `true` if the material is transparent.

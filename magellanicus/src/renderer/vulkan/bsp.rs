@@ -1,11 +1,10 @@
 use crate::error::MResult;
-use crate::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, DefaultType, Renderer};
+use crate::renderer::{AddBSPParameter, DefaultType, Renderer};
 
-use crate::renderer::vulkan::vertex::{VulkanModelVertex, VulkanModelVertexTextureCoords};
+use crate::renderer::data::BSPGeometry;
+use crate::renderer::vulkan::vertex::{VulkanModelVertex, VulkanModelVertexLightmapTextureCoords, VulkanModelVertexTextureCoords};
 use crate::renderer::vulkan::{default_allocation_create_info, VulkanPipelineType};
-use crate::vertex::ModelTriangle;
 use std::collections::BTreeMap;
-use std::string::String;
 use std::sync::Arc;
 use std::vec::Vec;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
@@ -13,11 +12,14 @@ use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::image::sampler::{Sampler, SamplerAddressMode, SamplerCreateInfo};
 use vulkano::image::view::{ImageView, ImageViewCreateInfo};
 use vulkano::pipeline::Pipeline;
-use crate::renderer::data::BSPGeometry;
 
 pub struct VulkanBSPData {
+    pub vertex_data_subbuffer: Subbuffer<[VulkanModelVertex]>,
+    pub texture_coords_subbuffer: Subbuffer<[VulkanModelVertexTextureCoords]>,
+    pub lightmap_texture_coords_subbuffer: Subbuffer<[VulkanModelVertexLightmapTextureCoords]>,
+    pub index_subbuffer: Subbuffer<[u16]>,
+
     pub lightmap_images: BTreeMap<usize, Arc<PersistentDescriptorSet>>,
-    pub cluster_surface_index_buffers: Vec<Vec<Vec<Option<Subbuffer<[u16]>>>>>,
     pub null_lightmaps: Arc<PersistentDescriptorSet>,
 
     pub transparent_geometries: Vec<usize>,
@@ -28,9 +30,38 @@ impl VulkanBSPData {
     pub fn new(
         renderer: &mut Renderer,
         param: &AddBSPParameter,
-        surfaces_ranges: &Vec<Vec<Vec<Vec<ModelTriangle>>>>,
         geometries: &Vec<BSPGeometry>
     ) -> MResult<Self> {
+        let mut vertex_data: Vec<VulkanModelVertex> = Vec::new();
+        let mut indices: Vec<u16> = Vec::new();
+        let mut texture_coords_data: Vec<VulkanModelVertexTextureCoords> = Vec::new();
+        let mut lightmap_texture_coords_data: Vec<VulkanModelVertexLightmapTextureCoords> = Vec::new();
+
+        for l in &param.lightmap_sets {
+            for m in &l.materials {
+                indices.extend(m.surfaces.iter().map(|m| m.indices.iter()).flatten());
+                vertex_data.extend(m.shader_vertices.iter().map(|s| VulkanModelVertex {
+                    position: s.position,
+                    normal: s.normal,
+                    binormal: s.binormal,
+                    tangent: s.tangent
+                }));
+                texture_coords_data.extend(m.shader_vertices.iter().map(|s| VulkanModelVertexTextureCoords {
+                    texture_coords: s.texture_coords
+                }));
+                if let Some(n) = m.lightmap_vertices.as_ref() {
+                    lightmap_texture_coords_data.extend(n.iter().map(|s| VulkanModelVertexLightmapTextureCoords {
+                        lightmap_texture_coords: s.lightmap_texture_coords
+                    }));
+                }
+                else {
+                    lightmap_texture_coords_data.extend(m.shader_vertices.iter().map(|s| VulkanModelVertexLightmapTextureCoords {
+                        lightmap_texture_coords: s.texture_coords
+                    }));
+                }
+            }
+        }
+
         let shader_environment_pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
         let mut images = BTreeMap::new();
         if let Some(n) = &param.lightmap_bitmap {
@@ -77,38 +108,6 @@ impl VulkanBSPData {
             }
         }
 
-        let cluster_surface_index_buffers: Vec<Vec<Vec<Option<Subbuffer<[u16]>>>>> = surfaces_ranges
-            .iter()
-            .map(|cluster| cluster
-                .iter()
-                .map(|lightmap| {
-                    lightmap
-                        .iter()
-                        .map(|material| {
-                            if material.is_empty() {
-                                None
-                            }
-                            else {
-                                let indices: Vec<u16> = material
-                                    .iter()
-                                    .map(|triangle| triangle.indices.iter().copied())
-                                    .flatten()
-                                    .collect();
-                                let index_buffer = Buffer::from_iter(
-                                    renderer.renderer.memory_allocator.clone(),
-                                    BufferCreateInfo { usage: BufferUsage::INDEX_BUFFER, ..Default::default() },
-                                    default_allocation_create_info(),
-                                    indices
-                                ).unwrap();
-                                Some(index_buffer)
-                            }
-                        })
-                        .collect()
-                })
-                .collect()
-            )
-            .collect();
-
         let null_set = PersistentDescriptorSet::new(
             renderer.renderer.descriptor_set_allocator.as_ref(),
             shader_environment_pipeline.layout().set_layouts()[1].clone(),
@@ -122,7 +121,7 @@ impl VulkanBSPData {
         let mut transparent_geometries: Vec<usize> = geometries
             .iter()
             .enumerate()
-            .filter_map(|f| if renderer.shaders[&f.1.vulkan.shader].vulkan.pipeline_data.is_transparent() {
+            .filter_map(|f| if renderer.shaders[&f.1.shader].vulkan.pipeline_data.is_transparent() {
                 Some(f.0)
             }
             else {
@@ -132,91 +131,65 @@ impl VulkanBSPData {
         let mut opaque_geometries: Vec<usize> = geometries
             .iter()
             .enumerate()
-            .filter_map(|f| if !renderer.shaders[&f.1.vulkan.shader].vulkan.pipeline_data.is_transparent() {
+            .filter_map(|f| if !renderer.shaders[&f.1.shader].vulkan.pipeline_data.is_transparent() {
                 Some(f.0)
             }
             else {
                 None
             }).collect();
 
-        transparent_geometries.sort_by(|a,b| geometries[*a].vulkan.shader.cmp(&geometries[*b].vulkan.shader));
-        opaque_geometries.sort_by(|a,b| geometries[*a].vulkan.shader.cmp(&geometries[*b].vulkan.shader));
+        transparent_geometries.sort_by(|a,b| geometries[*a].shader.cmp(&geometries[*b].shader));
+        opaque_geometries.sort_by(|a,b| geometries[*a].shader.cmp(&geometries[*b].shader));
 
-        Ok(Self { lightmap_images: images, cluster_surface_index_buffers, null_lightmaps: null_set, opaque_geometries, transparent_geometries })
-    }
-}
-
-pub struct VulkanBSPGeometryData {
-    pub vertex_buffer: Subbuffer<[VulkanModelVertex]>,
-    pub texture_coords_buffer: Subbuffer<[VulkanModelVertexTextureCoords]>,
-    pub lightmap_texture_coords_buffer: Option<Subbuffer<[VulkanModelVertexTextureCoords]>>,
-    pub index_buffer: Subbuffer<[u16]>,
-    pub shader: Arc<String>
-}
-
-impl VulkanBSPGeometryData {
-    pub fn new(renderer: &mut Renderer, _param: &AddBSPParameter, material: &AddBSPParameterLightmapMaterial, lightmap_index: Option<usize>) -> MResult<Self> {
-        let vertex_buffer = Buffer::from_iter(
+        let vertex_data_subbuffer = Buffer::from_iter(
             renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo { usage: BufferUsage::VERTEX_BUFFER, ..Default::default() },
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
             default_allocation_create_info(),
-            material.shader_vertices.iter().map(|v| {
-                VulkanModelVertex {
-                    position: v.position,
-                    normal: v.normal,
-                    binormal: v.binormal,
-                    tangent: v.tangent,
-                }
-            })
+            vertex_data.into_iter()
         )?;
 
-        let (shader, ..) = renderer.shaders.get_key_value(&material.shader).expect("shader?????");
-
-        let texture_coords_buffer = Buffer::from_iter(
+        let texture_coords_subbuffer = Buffer::from_iter(
             renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo { usage: BufferUsage::VERTEX_BUFFER, ..Default::default() },
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
             default_allocation_create_info(),
-            material.shader_vertices.iter().map(|v| {
-                VulkanModelVertexTextureCoords {
-                    texture_coords: v.texture_coords
-                }
-            })
+            texture_coords_data.into_iter()
         )?;
 
-        let lightmap_texture_coords_buffer: Option<Subbuffer<[VulkanModelVertexTextureCoords]>> = if let Some(v) = material.lightmap_vertices.as_ref().and_then(|f| lightmap_index.is_some().then_some(f)) {
-            let buffer = Buffer::from_iter(
-                renderer.renderer.memory_allocator.clone(),
-                BufferCreateInfo { usage: BufferUsage::VERTEX_BUFFER, ..Default::default() },
-                default_allocation_create_info(),
-                v
-                    .iter()
-                    .map(|v| {
-                        VulkanModelVertexTextureCoords {
-                            texture_coords: v.lightmap_texture_coords
-                        }
-                    })
-            )?;
-            Some(buffer)
-        }
-        else {
-            None
-        };
-
-        let index_iter: Vec<u16> = material
-            .surfaces
-            .iter()
-            .map(|t| t.indices.iter())
-            .flatten()
-            .copied()
-            .collect();
-
-        let index_buffer = Buffer::from_iter(
+        let lightmap_texture_coords_subbuffer = Buffer::from_iter(
             renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo { usage: BufferUsage::INDEX_BUFFER, ..Default::default() },
+            BufferCreateInfo {
+                usage: BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
             default_allocation_create_info(),
-            index_iter
+            lightmap_texture_coords_data.into_iter()
         )?;
 
-        Ok(VulkanBSPGeometryData { vertex_buffer, texture_coords_buffer, lightmap_texture_coords_buffer, shader: shader.clone(), index_buffer })
+        let index_subbuffer = Buffer::from_iter(
+            renderer.renderer.memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            default_allocation_create_info(),
+            indices.into_iter()
+        )?;
+
+        Ok(Self {
+            vertex_data_subbuffer,
+            texture_coords_subbuffer,
+            lightmap_texture_coords_subbuffer,
+            index_subbuffer,
+            lightmap_images: images,
+            null_lightmaps: null_set,
+            opaque_geometries,
+            transparent_geometries
+        })
     }
 }

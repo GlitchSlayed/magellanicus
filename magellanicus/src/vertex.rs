@@ -19,3 +19,10 @@ pub struct LightmapVertex {
 pub struct ModelTriangle {
     pub indices: [u16; 3]
 }
+
+#[derive(Copy, Clone, Debug)]
+pub struct VertexOffsets {
+    pub index_count: u32,
+    pub vertex_offset: i32,
+    pub index_offset: u32,
+}

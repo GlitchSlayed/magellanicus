@@ -49,6 +49,7 @@ use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp, Framebuffer, Fra
 use vulkano::swapchain::{acquire_next_image, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 use vulkano::{single_pass_renderpass, Validated, ValidationError, VulkanError};
+use crate::vertex::VertexOffsets;
 
 pub(crate) static OFFLINE_PIPELINE_COLOR_FORMAT: Format = Format::R8G8B8A8_UNORM;
 
@@ -549,19 +550,26 @@ impl VulkanRenderer {
         let mut transparent_geometries: Vec<(usize, f32)> = Vec::with_capacity(256);
 
         if let Some(bsp) = currently_loaded_bsp {
+            command_builder.bind_index_buffer(bsp.vulkan.index_subbuffer.clone()).expect("failed to bind indices");
+            command_builder.bind_vertex_buffers(0, (
+                bsp.vulkan.vertex_data_subbuffer.clone(),
+                bsp.vulkan.texture_coords_subbuffer.clone(),
+                bsp.vulkan.lightmap_texture_coords_subbuffer.clone()
+            )).expect("failed to bind vertex data");
+
             let mvp = make_model_view_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj);
 
             // Draw non-transparent shaders first
             let mut last_shader = None;
 
-            let get_geometry_shader = |f: &usize| (&bsp.geometries[*f], &renderer.shaders[&bsp.geometries[*f].vulkan.shader].vulkan.pipeline_data);
+            let get_geometry_shader = |f: &usize| (&bsp.geometries[*f], &renderer.shaders[&bsp.geometries[*f].shader].vulkan.pipeline_data);
 
             for (geometry, shader) in bsp
                 .vulkan
                 .opaque_geometries
                 .iter()
                 .map(get_geometry_shader) {
-                Self::draw_bsp_geometry(renderer, bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
+                Self::draw_bsp_geometry(renderer, bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader, &geometry.offset);
             }
 
             transparent_geometries.extend(bsp
@@ -577,11 +585,11 @@ impl VulkanRenderer {
                 .iter()
                 .map(|b| &b.0)
                 .map(get_geometry_shader) {
-                if geometry.vulkan.shader.ends_with("water") {
+                if geometry.shader.ends_with("water") {
                     // FIXME: water is not yet supported and the fallback shader is broken for it; should be fixed later
                     continue;
                 }
-                Self::draw_bsp_geometry(renderer, bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader);
+                Self::draw_bsp_geometry(renderer, bsp, command_builder, &camera, &mut last_shader, geometry, fog.clone(), mvp.clone(), shader, &geometry.offset);
             }
         }
 
@@ -597,9 +605,10 @@ impl VulkanRenderer {
         geometry: &'a BSPGeometry,
         fog_data: Arc<PersistentDescriptorSet>,
         mvp: Arc<PersistentDescriptorSet>,
-        shader: &Arc<dyn VulkanMaterial>
+        shader: &Arc<dyn VulkanMaterial>,
+        vertices: &VertexOffsets
     ) {
-        let this_shader = &geometry.vulkan.shader;
+        let this_shader = &geometry.shader;
         let repeat_shader = if *last_shader != Some(this_shader) && shader.can_reuse_descriptors() {
             false
         }
@@ -626,30 +635,8 @@ impl VulkanRenderer {
         upload_fog_uniform(&mut command_builder, main_pipeline.clone(), fog_data.clone());
         upload_lightmap_descriptor_set(desired_lightmap, &currently_loaded_bsp, &mut command_builder, main_pipeline.clone());
 
-        let index_buffer = geometry.vulkan.index_buffer.clone();
-        let index_count = index_buffer.len() as usize;
-        command_builder.bind_index_buffer(index_buffer).expect("can't bind indices");
-
-        if main_pipeline.has_lightmaps() {
-            command_builder.bind_vertex_buffers(0, (
-                geometry.vulkan.vertex_buffer.clone(),
-                geometry.vulkan.texture_coords_buffer.clone(),
-                if geometry.vulkan.lightmap_texture_coords_buffer.is_none() {
-                    geometry.vulkan.texture_coords_buffer.clone()
-                } else {
-                    geometry.vulkan.lightmap_texture_coords_buffer.clone().unwrap()
-                }
-            )).unwrap();
-        }
-        else {
-            command_builder.bind_vertex_buffers(0, (
-                geometry.vulkan.vertex_buffer.clone(),
-                geometry.vulkan.texture_coords_buffer.clone()
-            )).unwrap();
-        }
-
         shader
-            .generate_commands(renderer, index_count as u32, repeat_shader, &mut command_builder)
+            .generate_commands(renderer, &vertices, repeat_shader, &mut command_builder)
             .expect("can't generate stage commands");
     }
 

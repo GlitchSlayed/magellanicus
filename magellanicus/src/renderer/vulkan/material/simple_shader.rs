@@ -1,5 +1,5 @@
 use crate::error::MResult;
-use crate::renderer::vulkan::{VulkanMaterial, VulkanPipelineType};
+use crate::renderer::vulkan::{VertexOffsets, VulkanMaterial, VulkanPipelineType};
 use crate::renderer::{AddShaderBasicShaderData, DefaultType, Renderer};
 use std::eprintln;
 use std::sync::Arc;
@@ -64,7 +64,7 @@ impl VulkanMaterial for VulkanSimpleShaderMaterial {
     fn generate_commands(
         &self,
         renderer: &Renderer,
-        index_count: u32,
+        vertices: &VertexOffsets,
         repeat_shader: bool,
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
@@ -77,7 +77,7 @@ impl VulkanMaterial for VulkanSimpleShaderMaterial {
                 self.descriptor_set.clone()
             )?;
         }
-        to.draw_indexed(index_count, 1, 0, 0, 0)?;
+        vertices.make_vulkan_draw_command(to)?;
         Ok(())
     }
 

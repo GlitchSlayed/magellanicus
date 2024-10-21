@@ -1,5 +1,5 @@
 use crate::error::MResult;
-use crate::renderer::vulkan::{default_allocation_create_info, VulkanMaterial, VulkanPipelineType};
+use crate::renderer::vulkan::{default_allocation_create_info, VertexOffsets, VulkanMaterial, VulkanPipelineType};
 use crate::renderer::{AddShaderEnvironmentShaderData, DefaultType, Renderer};
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
@@ -122,7 +122,7 @@ impl VulkanMaterial for VulkanShaderEnvironmentMaterial {
     fn generate_commands(
         &self,
         renderer: &Renderer,
-        index_count: u32,
+        vertices: &VertexOffsets,
         repeat_shader: bool,
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
@@ -135,7 +135,7 @@ impl VulkanMaterial for VulkanShaderEnvironmentMaterial {
                 self.descriptor_set.clone()
             )?;
         }
-        to.draw_indexed(index_count, 1, 0, 0, 0)?;
+        vertices.make_vulkan_draw_command(to)?;
         Ok(())
     }
 

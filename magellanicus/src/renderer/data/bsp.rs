@@ -1,9 +1,10 @@
 use crate::error::MResult;
-use crate::renderer::vulkan::{VulkanBSPData, VulkanBSPGeometryData};
+use crate::renderer::vulkan::VulkanBSPData;
 use crate::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, BSPData, Renderer};
-use crate::vertex::ModelTriangle;
+use crate::vertex::VertexOffsets;
 use alloc::vec::Vec;
-use core::ops::Range;
+use alloc::sync::Arc;
+use alloc::string::String;
 
 pub const MIN_DRAW_DISTANCE_LIMIT: f32 = 100.0;
 pub const MAX_DRAW_DISTANCE_LIMIT: f32 = 2250.0;
@@ -59,6 +60,9 @@ impl BSP {
         let mut min_y = f32::INFINITY;
         let mut min_z = f32::INFINITY;
 
+        let mut vertex_offset = 0i32;
+        let mut index_offset = 0u32;
+
         for data in add_bsp_iterator {
             for p in &data.material_data.shader_vertices {
                 min_x = min_x.min(p.position[0]);
@@ -69,18 +73,27 @@ impl BSP {
                 max_z = max_z.max(p.position[2]);
             }
 
+            let index_count = (data.material_data.surfaces.len() * 3) as u32;
             geometries.push(BSPGeometry {
-                vulkan: VulkanBSPGeometryData::new(renderer, &add_bsp_parameter, data.material_data, data.lightmap_bitmap_index)?,
+                shader: renderer.shaders.get_key_value(&data.material_data.shader).unwrap().0.clone(),
                 lightmap_index: data.material_data.lightmap_vertices.as_ref().and(data.lightmap_bitmap_index),
                 material_reflexive_index: data.material_reflexive_index,
                 lightmap_reflexive_index: data.lightmap_reflexive_index,
-                centroid: data.material_data.centroid
-            })
+                centroid: data.material_data.centroid,
+                offset: VertexOffsets {
+                    index_offset,
+                    vertex_offset,
+                    index_count
+                },
+            });
+
+            vertex_offset += data.material_data.shader_vertices.len() as i32;
+            index_offset += index_count;
         }
 
         let mut geometry_indices_sorted_by_material = Vec::from_iter(0usize..geometries.len());
         geometry_indices_sorted_by_material.sort_by(|a, b| {
-            geometries[*a].vulkan.shader.cmp(&geometries[*b].vulkan.shader)
+            geometries[*a].shader.cmp(&geometries[*b].shader)
         });
 
         let draw_distance = if max_x == f32::NEG_INFINITY {
@@ -94,72 +107,17 @@ impl BSP {
         }.clamp(MIN_DRAW_DISTANCE_LIMIT, MAX_DRAW_DISTANCE_LIMIT);
 
         let bsp_data = &mut add_bsp_parameter.bsp_data;
-        let mut cluster_surfaces: Vec<Vec<usize>> = Vec::with_capacity(bsp_data.clusters.len());
+        let cluster_surfaces: Vec<Vec<usize>> = Vec::with_capacity(bsp_data.clusters.len());
 
-        // Get all surfaces for all clusters
-        for cluster in &mut bsp_data.clusters {
-            for subcluster in &mut cluster.subclusters {
-                subcluster.surface_indices.sort();
-                subcluster.surface_indices.dedup();
-            }
-
-            let all_surfaces_iter = cluster
-                .subclusters
-                .iter()
-                .map(|c| c.surface_indices.iter())
-                .flatten();
-
-            let mut all_surfaces: Vec<usize> = Vec::with_capacity(all_surfaces_iter.clone().count());
-            all_surfaces.extend(all_surfaces_iter);
-            all_surfaces.sort();
-            all_surfaces.dedup();
-            all_surfaces.shrink_to_fit();
-            cluster_surfaces.push(all_surfaces);
-        }
-
-        // Get all ranges for all lightmap sets
-        let mut index = 0usize;
-        let surfaces_ranges: Vec<Vec<Range<usize>>> = add_bsp_parameter.lightmap_sets.iter().map(|l| {
-            l.materials.iter().map(|mat| {
-                let new_index = index + mat.surfaces.len();
-                let range = index..new_index;
-                index = new_index;
-                range
-            }).collect()
-        }).collect();
-
-        // Now convert into triangle indices
-        //
-        // Maps clusters to lightmaps to materials to triangles
-        let mut so_many_vectors: Vec<Vec<Vec<Vec<ModelTriangle>>>> = Vec::with_capacity(bsp_data.clusters.len());
-        for surfaces_in_cluster in &cluster_surfaces {
-            let surface_ranges_filtered: Vec<Vec<Vec<ModelTriangle>>> = surfaces_ranges
-                .iter()
-                .enumerate()
-                .map(|(lightmap_set_index, lightmap_set)| {
-                    lightmap_set.iter().enumerate().map(|(material_index, material_range)| {
-                        surfaces_in_cluster.iter().filter_map(|index| if material_range.contains(index) {
-                            Some(add_bsp_parameter
-                                .lightmap_sets[lightmap_set_index]
-                                .materials[material_index]
-                                .surfaces[*index - material_range.start])
-                        }
-                        else {
-                            None
-                        }).collect()
-                    }).collect()
-                }).collect();
-            so_many_vectors.push(surface_ranges_filtered);
-        }
-
-        let vulkan = VulkanBSPData::new(renderer, &add_bsp_parameter, &so_many_vectors, &geometries)?;
+        let vulkan = VulkanBSPData::new(renderer, &add_bsp_parameter, &geometries)?;
 
         Ok(Self { vulkan, geometries, bsp_data: add_bsp_parameter.bsp_data, cluster_surfaces, draw_distance, geometry_indices_sorted_by_material })
     }
 }
 
 pub struct BSPGeometry {
-    pub vulkan: VulkanBSPGeometryData,
+    pub offset: VertexOffsets,
+    pub shader: Arc<String>,
     pub lightmap_index: Option<usize>,
     pub centroid: [f32; 3],
 
