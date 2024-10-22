@@ -72,8 +72,10 @@ flycam-test is a tool for testing the renderer. It's a huge mess, but it works.
 You need the following:
 * Rust
 * Vulkan ([MoltenVK] if on macOS)
+* [SDL2] development libraries
 
 [MoltenVK]: https://github.com/KhronosGroup/MoltenVK
+[SDL2]: https://wiki.libsdl.org/SDL2/Installation
 
 You do not necessarily need the Vulkan SDK to build this, but it does have some
 nice tools to help with debugging.
