@@ -81,7 +81,7 @@ You do not necessarily need the Vulkan SDK to build this, but it does have some
 nice tools to help with debugging.
 
 ```bash
-git clone https://github.com/SnowyMouse/magellanicus
+git clone https://github.com/FishAndRips/magellanicus
 cd magellanicus
 cargo run --release
 ```
