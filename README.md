@@ -62,7 +62,9 @@ These are a safe bet:
 Tested GPUs:
 * Nvidia GeForce RTX 4080 SUPER
 * AMD Radeon RX 580
+* AMD Radeon RX 5700XT
 * AMD Radeon R9 280X (same as the AMD Radeon HD 7970)
+* Intel Iris Xe Graphics
 * Apple M2
 
 ## How to run flycam-test (locally)
