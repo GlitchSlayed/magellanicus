@@ -64,7 +64,7 @@ impl Default for PlayerViewport {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Camera {
-    /// FoV in radians (default = 56 degrees)
+    /// Vertical FoV in radians
     pub fov: f32,
 
     /// Position in the map of the camera
@@ -83,11 +83,25 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         Self {
-            fov: 56.0f32.to_radians(),
+            fov: get_default_vertical_fov(),
             position: Vec3::default().to_array(),
             rotation: [0.0, 1.0, 0.0],
             lightmaps: true,
             fog: true
         }
     }
+}
+
+/// Default horizontal FoV to use.
+pub const DEFAULT_HORIZONTAL_FOV: f32 = 70.0;
+
+/// Get the default FoV.
+pub fn get_default_vertical_fov() -> f32 {
+    horizontal_to_vertical_fov(DEFAULT_HORIZONTAL_FOV.to_radians(), 640.0, 480.0)
+}
+
+/// Calculate the vertical FoV given horizontal FoV and aspect ratio.
+#[inline(always)]
+pub fn horizontal_to_vertical_fov(horizontal: f32, width: f32, height: f32) -> f32 {
+    2.0 * ((horizontal / 2.0).tan() * height / width).atan()
 }

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use magellanicus::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, FogData, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
+use magellanicus::renderer::{get_default_vertical_fov, AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, FogData, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::path::Path;
@@ -447,11 +447,14 @@ fn main() -> Result<(), String> {
                     let mut lock = handler.lock_renderer();
                     let mut camera = lock.renderer.get_camera_for_viewport(viewport_mod);
 
-                    let new_fov_deg = (camera.fov.to_degrees() + incrementor as f32 * 1.0)
+                    let default = get_default_vertical_fov().to_degrees();
+                    let new_fov_deg = (camera.fov.to_degrees() - default + incrementor as f32 * 1.0)
                         .round()
-                        .clamp(1.0, 179.0);
+                        .clamp(-40.0, 120.0) + default;
+
                     camera.fov = new_fov_deg.to_radians();
-                    println!("Setting camera #{viewport_mod}'s vertical FoV to {new_fov_deg:.04} ({}%) degrees", new_fov_deg / 56.0 * 100.0);
+
+                    println!("Setting camera #{viewport_mod}'s vertical FoV to {new_fov_deg:.04} ({}%) degrees", new_fov_deg / default * 100.0);
 
                     lock.renderer.set_camera_for_viewport(viewport_mod, camera);
                     continue

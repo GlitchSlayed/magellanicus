@@ -14,6 +14,9 @@ use player_viewport::*;
 use crate::error::{Error, MResult};
 
 pub use player_viewport::Camera;
+pub use player_viewport::get_default_vertical_fov;
+pub use player_viewport::horizontal_to_vertical_fov;
+
 use glam::{FloatExt, Vec3};
 
 mod parameters;
