@@ -11,10 +11,12 @@ mod vertex;
 mod material;
 
 use crate::error::{Error, MResult};
-use crate::renderer::data::{BSPGeometry, BSP};
+use crate::renderer::data::{BSPGeometry, BSP, MAX_DRAW_DISTANCE_LIMIT};
+use crate::renderer::player_viewport::PlayerViewport;
 use crate::renderer::vulkan::helper::{build_swapchain, LoadedVulkan};
 use crate::renderer::vulkan::vertex::{VulkanFogData, VulkanModelData, VulkanModelVertex};
-use crate::renderer::{Camera, Renderer, RendererParameters, Resolution, MSAA};
+use crate::renderer::{Camera, FogData, Renderer, RendererParameters, Resolution, MSAA};
+use crate::vertex::VertexOffsets;
 pub use bitmap::*;
 pub use bsp::*;
 pub use geometry::*;
@@ -49,7 +51,6 @@ use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp, Framebuffer, Fra
 use vulkano::swapchain::{acquire_next_image, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 use vulkano::{single_pass_renderpass, Validated, ValidationError, VulkanError};
-use crate::vertex::VertexOffsets;
 
 pub(crate) static OFFLINE_PIPELINE_COLOR_FORMAT: Format = Format::R8G8B8A8_UNORM;
 
@@ -393,7 +394,7 @@ impl VulkanRenderer {
         }).expect("failed to clear depth image");
 
         for i in 0..renderer.player_viewports.len() {
-            let player_viewport = &renderer.player_viewports[i];
+            let player_viewport = renderer.player_viewports[i];
 
             let viewport = Viewport {
                 offset: [player_viewport.rel_x * width, player_viewport.rel_y * height],
@@ -407,6 +408,7 @@ impl VulkanRenderer {
                 viewport,
                 &currently_loaded_bsp,
                 &mut command_builder,
+                &player_viewport,
                 player_viewport.camera.clone()
             );
         }
@@ -479,60 +481,37 @@ impl VulkanRenderer {
         viewport: Viewport,
         currently_loaded_bsp: &Option<Arc<BSP>>,
         command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        player_viewport: &PlayerViewport,
         camera: Camera
     ) {
         command_builder.set_viewport(0, [viewport.clone()].into_iter().collect()).unwrap();
         images.begin_rendering(command_builder);
 
         let aspect_ratio = viewport.extent[0] / viewport.extent[1];
-        let z_near = 0.0625;
+        let [z_near, mut z_far] = player_viewport.draw_distance;
 
-        let fog_data;
-        let mut z_far;
-        if let Some(bsp) = currently_loaded_bsp {
-            let cluster_index = bsp.bsp_data.find_cluster(camera.position);
-            let cluster = cluster_index.map(|c| &bsp.bsp_data.clusters[c]);
-            let sky = cluster.and_then(|c| c.sky.as_ref()).and_then(|s| renderer.skies.get(s));
+        let mut fog_data = player_viewport
+            .viewport_fog
+            .map(|f| f.current_fog_data)
+            .unwrap_or_default();
 
-            z_far = bsp.draw_distance;
-            if !camera.fog || sky.is_none() {
-                fog_data = FogData::default();
-            }
-            else {
-                let sky = sky.unwrap();
-
-                // TODO: determine which fog color
-                fog_data = FogData {
-                    color: [sky.outdoor_fog_color[0], sky.outdoor_fog_color[1], sky.outdoor_fog_color[2], 0.0],
-                    distance_from: sky.outdoor_fog_start_distance,
-                    distance_to: sky.outdoor_fog_opaque_distance,
-                    min_opacity: 0.0,
-                    max_opacity: sky.outdoor_fog_maximum_density,
-                };
-
-                // Occlude things that won't be visible anyway
-                if fog_data.max_opacity == 1.0 {
-                    z_far = z_far.min(fog_data.distance_to);
-                }
-            }
-
-            let sky_color = [fog_data.color[0], fog_data.color[1], fog_data.color[2], 1.0];
-            draw_box(
-                renderer,
-                0.0,
-                0.0,
-                1.0,
-                1.0,
-                sky_color,
-                command_builder
-            ).unwrap();
-        }
-        else {
-            z_far = 2250.0;
-            fog_data = FogData::default();
+        if !player_viewport.camera.fog {
+            fog_data.max_opacity = 0.0;
+            fog_data.min_opacity = 0.0;
+            z_far = MAX_DRAW_DISTANCE_LIMIT;
         }
 
-        z_far = z_far.max(z_near + 1.0);
+        let sky_color = [fog_data.color[0], fog_data.color[1], fog_data.color[2], 1.0];
+        draw_box(
+            renderer,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            sky_color,
+            command_builder
+        ).unwrap();
+
         let proj = Mat4::perspective_lh(
             camera.fov,
             aspect_ratio,
@@ -549,12 +528,14 @@ impl VulkanRenderer {
 
         let mut transparent_geometries: Vec<(usize, f32)> = Vec::with_capacity(256);
 
-        if let Some(bsp) = currently_loaded_bsp {
-            command_builder.bind_index_buffer(bsp.vulkan.index_subbuffer.clone()).expect("failed to bind indices");
+        if let Some((bsp, buffers)) = currently_loaded_bsp.as_ref().and_then(|bsp| {
+            Some((bsp, bsp.vulkan.subbuffers.as_ref()?))
+        }) {
+            command_builder.bind_index_buffer(buffers.index_subbuffer.clone()).expect("failed to bind indices");
             command_builder.bind_vertex_buffers(0, (
-                bsp.vulkan.vertex_data_subbuffer.clone(),
-                bsp.vulkan.texture_coords_subbuffer.clone(),
-                bsp.vulkan.lightmap_texture_coords_subbuffer.clone()
+                buffers.vertex_data_subbuffer.clone(),
+                buffers.texture_coords_subbuffer.clone(),
+                buffers.lightmap_texture_coords_subbuffer.clone()
             )).expect("failed to bind vertex data");
 
             let mvp = make_model_view_uniform(renderer, camera.position.into(), Vec3::default(), Mat3::IDENTITY, view, proj);
@@ -775,26 +756,6 @@ fn upload_lightmap_descriptor_set(
     ).unwrap();
 }
 
-struct FogData {
-    color: [f32; 4],
-    distance_from: f32,
-    distance_to: f32,
-    min_opacity: f32,
-    max_opacity: f32
-}
-
-impl Default for FogData {
-    fn default() -> Self {
-        Self {
-            color: [0.0f32; 4],
-            distance_from: 0.0,
-            distance_to: 1.0,
-            min_opacity: 0.0,
-            max_opacity: 0.0
-        }
-    }
-}
-
 fn upload_main_material_uniform(
     builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
     pipeline: Arc<dyn VulkanPipelineData>,
@@ -839,7 +800,7 @@ fn make_fog_uniform(
         sky_fog_from: fog.distance_from,
         sky_fog_min_opacity: fog.min_opacity,
         sky_fog_max_opacity: fog.max_opacity,
-        sky_fog_color: fog.color
+        sky_fog_color: [fog.color[0], fog.color[1], fog.color[2], 1.0]
     };
 
     let fog_uniform_buffer = Buffer::from_data(

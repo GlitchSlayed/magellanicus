@@ -8,6 +8,7 @@ use alloc::string::String;
 
 pub const MIN_DRAW_DISTANCE_LIMIT: f32 = 100.0;
 pub const MAX_DRAW_DISTANCE_LIMIT: f32 = 2250.0;
+pub const DRAW_DISTANCE_MINIMUM: f32 = 0.0625;
 
 pub struct BSP {
     pub vulkan: VulkanBSPData,

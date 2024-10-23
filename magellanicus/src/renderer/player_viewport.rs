@@ -1,4 +1,6 @@
 use glam::Vec3;
+use crate::renderer::data::{DRAW_DISTANCE_MINIMUM, MAX_DRAW_DISTANCE_LIMIT};
+use crate::renderer::FogData;
 
 #[derive(Copy, Clone, Debug)]
 pub struct PlayerViewport {
@@ -15,7 +17,35 @@ pub struct PlayerViewport {
     pub rel_height: f32,
 
     /// Camera data
-    pub camera: Camera
+    pub camera: Camera,
+
+    /// Current viewport fog data.
+    ///
+    /// NOTE: This will be automatically modified to the correct values when a BSP is loaded.
+    pub viewport_fog: Option<ViewportFog>,
+
+    /// Current draw distance.
+    ///
+    /// NOTE: This will be automatically modified to the correct value when a BSP is loaded.
+    pub draw_distance: [f32; 2],
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ViewportFog {
+    /// Current fog data (displayed)
+    pub current_fog_data: FogData,
+
+    /// Current outdoor fog.
+    pub outdoor_fog_data: FogData,
+
+    /// Current indoor fog.
+    pub indoor_fog_data: FogData,
+
+    /// Target fog data (transitioned as the camera moves)
+    pub target_fog_data: FogData,
+
+    /// Pending transition amount.
+    pub transition_amount: f32
 }
 
 impl Default for PlayerViewport {
@@ -25,7 +55,9 @@ impl Default for PlayerViewport {
             rel_y: 0.0,
             rel_width: 1.0,
             rel_height: 1.0,
-            camera: Camera::default()
+            camera: Camera::default(),
+            viewport_fog: None,
+            draw_distance: [DRAW_DISTANCE_MINIMUM, MAX_DRAW_DISTANCE_LIMIT],
         }
     }
 }

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use magellanicus::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
+use magellanicus::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, FogData, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::path::Path;
@@ -927,14 +927,20 @@ impl FlycamTestHandler {
     fn load_sky(renderer: &mut Renderer, path: &TagPath, sky: &Sky) -> Result<(), String> {
         renderer.add_sky(&path.to_string(), AddSkyParameter {
             geometry: None,
-            outdoor_fog_color: [sky.outdoor_fog.color.red as f32, sky.outdoor_fog.color.green as f32, sky.outdoor_fog.color.blue as f32],
-            outdoor_fog_maximum_density: sky.outdoor_fog.maximum_density as f32,
-            outdoor_fog_start_distance: sky.outdoor_fog.start_distance as f32,
-            outdoor_fog_opaque_distance: sky.outdoor_fog.opaque_distance as f32,
-            indoor_fog_color: [sky.indoor_fog.color.red as f32, sky.indoor_fog.color.green as f32, sky.indoor_fog.color.blue as f32],
-            indoor_fog_maximum_density: sky.indoor_fog.maximum_density as f32,
-            indoor_fog_start_distance: sky.indoor_fog.start_distance as f32,
-            indoor_fog_opaque_distance: sky.indoor_fog.opaque_distance as f32,
+            outdoor_fog: FogData {
+                color: [sky.outdoor_fog.color.red as f32, sky.outdoor_fog.color.green as f32, sky.outdoor_fog.color.blue as f32],
+                max_opacity: sky.outdoor_fog.maximum_density as f32,
+                distance_from: sky.outdoor_fog.start_distance as f32,
+                distance_to: sky.outdoor_fog.opaque_distance as f32,
+                min_opacity: 0.0
+            },
+            indoor_fog: FogData {
+                color: [sky.indoor_fog.color.red as f32, sky.indoor_fog.color.green as f32, sky.indoor_fog.color.blue as f32],
+                max_opacity: sky.indoor_fog.maximum_density as f32,
+                distance_from: sky.indoor_fog.start_distance as f32,
+                distance_to: sky.indoor_fog.opaque_distance as f32,
+                min_opacity: 0.0
+            },
         }).map_err(|e| e.to_string())
     }
 

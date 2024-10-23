@@ -14,10 +14,7 @@ use vulkano::image::view::{ImageView, ImageViewCreateInfo};
 use vulkano::pipeline::Pipeline;
 
 pub struct VulkanBSPData {
-    pub vertex_data_subbuffer: Subbuffer<[VulkanModelVertex]>,
-    pub texture_coords_subbuffer: Subbuffer<[VulkanModelVertexTextureCoords]>,
-    pub lightmap_texture_coords_subbuffer: Subbuffer<[VulkanModelVertexLightmapTextureCoords]>,
-    pub index_subbuffer: Subbuffer<[u16]>,
+    pub subbuffers: Option<VulkanBSPVertexDataBuffers>,
 
     pub lightmap_images: BTreeMap<usize, Arc<PersistentDescriptorSet>>,
     pub null_lightmaps: Arc<PersistentDescriptorSet>,
@@ -141,55 +138,71 @@ impl VulkanBSPData {
         transparent_geometries.sort_by(|a,b| geometries[*a].shader.cmp(&geometries[*b].shader));
         opaque_geometries.sort_by(|a,b| geometries[*a].shader.cmp(&geometries[*b].shader));
 
-        let vertex_data_subbuffer = Buffer::from_iter(
-            renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            default_allocation_create_info(),
-            vertex_data.into_iter()
-        )?;
+        let subbuffers = if !indices.is_empty() {
+            let vertex_data_subbuffer = Buffer::from_iter(
+                renderer.renderer.memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage: BufferUsage::VERTEX_BUFFER,
+                    ..Default::default()
+                },
+                default_allocation_create_info(),
+                vertex_data.into_iter()
+            )?;
 
-        let texture_coords_subbuffer = Buffer::from_iter(
-            renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            default_allocation_create_info(),
-            texture_coords_data.into_iter()
-        )?;
+            let texture_coords_subbuffer = Buffer::from_iter(
+                renderer.renderer.memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage: BufferUsage::VERTEX_BUFFER,
+                    ..Default::default()
+                },
+                default_allocation_create_info(),
+                texture_coords_data.into_iter()
+            )?;
 
-        let lightmap_texture_coords_subbuffer = Buffer::from_iter(
-            renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            default_allocation_create_info(),
-            lightmap_texture_coords_data.into_iter()
-        )?;
+            let lightmap_texture_coords_subbuffer = Buffer::from_iter(
+                renderer.renderer.memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage: BufferUsage::VERTEX_BUFFER,
+                    ..Default::default()
+                },
+                default_allocation_create_info(),
+                lightmap_texture_coords_data.into_iter()
+            )?;
 
-        let index_subbuffer = Buffer::from_iter(
-            renderer.renderer.memory_allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::INDEX_BUFFER,
-                ..Default::default()
-            },
-            default_allocation_create_info(),
-            indices.into_iter()
-        )?;
+            let index_subbuffer = Buffer::from_iter(
+                renderer.renderer.memory_allocator.clone(),
+                BufferCreateInfo {
+                    usage: BufferUsage::INDEX_BUFFER,
+                    ..Default::default()
+                },
+                default_allocation_create_info(),
+                indices.into_iter()
+            )?;
+
+            Some(VulkanBSPVertexDataBuffers {
+                vertex_data_subbuffer,
+                texture_coords_subbuffer,
+                lightmap_texture_coords_subbuffer,
+                index_subbuffer,
+            })
+        }
+        else {
+            None
+        };
 
         Ok(Self {
-            vertex_data_subbuffer,
-            texture_coords_subbuffer,
-            lightmap_texture_coords_subbuffer,
-            index_subbuffer,
+            subbuffers,
             lightmap_images: images,
             null_lightmaps: null_set,
             opaque_geometries,
             transparent_geometries
         })
     }
+}
+
+pub struct VulkanBSPVertexDataBuffers {
+    pub vertex_data_subbuffer: Subbuffer<[VulkanModelVertex]>,
+    pub texture_coords_subbuffer: Subbuffer<[VulkanModelVertexTextureCoords]>,
+    pub lightmap_texture_coords_subbuffer: Subbuffer<[VulkanModelVertexLightmapTextureCoords]>,
+    pub index_subbuffer: Subbuffer<[u16]>,
 }

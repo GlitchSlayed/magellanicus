@@ -113,9 +113,10 @@ These are what have to be done for the renderer to be complete.
       * Renders as white
     * 🔴 `shader_transparent_water`
       * Disabled
-  * 🟡 Ambient fog
+  * 🟢 Ambient fog
     * 🟢 Outdoor fog
-    * 🔴 Indoor fog
+    * 🟢 Indoor fog
+    * 🟢 Transitioning fog between different skyboxes
   * 🔴 Ambient lighting
   * 🟡 BSPs
     * 🟡 Currently renders most geometry
