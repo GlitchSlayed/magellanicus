@@ -4,6 +4,7 @@ use alloc::vec;
 use alloc::sync::Arc;
 use core::iter;
 use crate::error::MResult;
+use crate::to_rgbaf32;
 use crate::renderer::{AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, BitmapFormat, Renderer, Resolution};
 use crate::renderer::vulkan::VulkanBitmapData;
 
@@ -70,19 +71,6 @@ pub struct BitmapSprite {
 
 pub fn populate_default_bitmaps(renderer: &mut Renderer) -> MResult<()> {
     fn make_add_bitmap_parameter(renderer: &mut Renderer, path: &str, bitmap_type: BitmapType) -> MResult<Arc<String>> {
-        fn to_rgbaf32(v: [f32; 4]) -> [u8; 16] {
-            let r = v[0].to_le_bytes();
-            let g = v[1].to_le_bytes();
-            let b = v[2].to_le_bytes();
-            let a = v[3].to_le_bytes();
-            [
-                r[0],r[1],r[2],r[3],
-                g[0],g[1],g[2],g[3],
-                b[0],b[1],b[2],b[3],
-                a[0],a[1],a[2],a[3],
-            ]
-        }
-
         // note: black is fully transparent in source data, but all release builds are fully opaque
         // due to a bug with tool.exe
         let null: [u8; 16] = to_rgbaf32([0.0, 0.0, 0.0, 0.0]);

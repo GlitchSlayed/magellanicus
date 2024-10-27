@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use alloc::format;
 use alloc::vec;
 use alloc::borrow::ToOwned;
+use std::collections::VecDeque;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use data::*;
 
@@ -18,6 +19,7 @@ pub use player_viewport::get_default_vertical_fov;
 pub use player_viewport::horizontal_to_vertical_fov;
 
 use glam::{FloatExt, Vec3};
+use crate::FloatColor;
 
 mod parameters;
 mod vulkan;
@@ -33,9 +35,15 @@ pub struct Renderer {
     geometries: BTreeMap<Arc<String>, Geometry>,
     skies: BTreeMap<Arc<String>, Sky>,
     bsps: BTreeMap<Arc<String>, Arc<BSP>>,
+    fonts: BTreeMap<Arc<String>, Font>,
 
     default_bitmaps: DefaultBitmaps,
-    current_bsp: Option<Arc<String>>
+    current_bsp: Option<Arc<String>>,
+
+    displayed_fps: f32,
+    debug_text: VecDeque<Bitmap>,
+    debug_text_stale: bool,
+    debug_font: Option<Arc<String>>
 }
 
 impl Renderer {
@@ -117,8 +125,13 @@ impl Renderer {
             geometries: BTreeMap::new(),
             skies: BTreeMap::new(),
             bsps: BTreeMap::new(),
+            fonts: BTreeMap::new(),
             current_bsp: None,
-            default_bitmaps: DefaultBitmaps::default()
+            default_bitmaps: DefaultBitmaps::default(),
+            displayed_fps: 0.0,
+            debug_text: VecDeque::with_capacity(64),
+            debug_text_stale: true,
+            debug_font: None,
         };
 
         populate_default_bitmaps(&mut result)?;
@@ -135,10 +148,31 @@ impl Renderer {
         self.geometries.clear();
         self.skies.clear();
         self.bsps.clear();
+        self.fonts.clear();
         self.current_bsp = None;
+        self.debug_font = None;
         self.default_bitmaps = DefaultBitmaps::default();
 
         populate_default_bitmaps(self).unwrap();
+        self.invalidate_debug_text();
+    }
+
+    /// Add a font with the given parameters.
+    ///
+    /// Note that replacing fonts is not yet supported.
+    ///
+    /// This will error if:
+    /// - `font` is invalid
+    pub fn add_font(&mut self, path: &str, font: AddFontParameter) -> MResult<()> {
+        let font_path = Arc::new(path.to_owned());
+        if self.fonts.contains_key(&font_path) {
+            return Err(Error::from_data_error_string(format!("{path} already exists (replacing fonts is not yet supported)")))
+        }
+
+        font.validate()?;
+        let font = Font::load_from_parameters(self, font)?;
+        self.fonts.insert(font_path, font);
+        Ok(())
     }
 
     /// Add a bitmap with the given parameters.
@@ -150,7 +184,7 @@ impl Renderer {
     /// - replacing a bitmap would break any dependencies (HUDs, shaders, etc.)
     pub fn add_bitmap(&mut self, path: &str, bitmap: AddBitmapParameter) -> MResult<()> {
         let bitmap_path = Arc::new(path.to_owned());
-        if self.bsps.contains_key(&bitmap_path) {
+        if self.bitmaps.contains_key(&bitmap_path) {
             return Err(Error::from_data_error_string(format!("{path} already exists (replacing bitmaps is not yet supported)")))
         }
 
@@ -292,6 +326,9 @@ impl Renderer {
         assert!(camera.fov > 0.0 && camera.fov < core::f32::consts::PI, "camera.fov is not between 0 (exclusive) and pi (exclusive)");
 
         let viewport = &mut self.player_viewports[viewport];
+        if camera == viewport.camera {
+            return;
+        }
 
         // FIXME: determine how fast it is supposed to be transitioned here?
         let fog_transition_amount = Vec3::from(camera.position).distance(Vec3::from(viewport.camera.position)).min(10.0) / 10.0;
@@ -305,7 +342,9 @@ impl Renderer {
             fov: camera.fov,
             lightmaps: camera.lightmaps,
             fog: camera.fog
-        }
+        };
+
+        self.invalidate_debug_text();
     }
 
     /// Get the camera data for the given viewport.
@@ -326,8 +365,43 @@ impl Renderer {
     ///
     /// If `true`, the swapchain needs rebuilt.
     pub fn draw_frame(&mut self) -> MResult<bool> {
+        if self.debug_text_stale {
+            self.draw_debug_text()?;
+        }
         self.fixup_fog_and_render_distances();
         VulkanRenderer::draw_frame(self)
+    }
+
+    /// Set whether debug info is displayed.
+    ///
+    /// Returns `Err` if the `font` is not loaded.
+    pub fn set_debug_font(&mut self, font: Option<&str>) -> MResult<()> {
+        match font {
+            Some(font) => {
+                let Some(font) = self.fonts.get_key_value(&font.to_owned()) else {
+                    return Err(Error::from_data_error_string(format!("Font {font} is not loaded")))
+                };
+                self.debug_font = Some(font.0.clone())
+            }
+            None => {
+                self.debug_font = None;
+            }
+        }
+
+        self.invalidate_debug_text();
+        Ok(())
+    }
+
+    /// Set the displayed frame rate.
+    pub fn set_debug_fps(&mut self, fps: f32) {
+        if self.displayed_fps != fps {
+            self.displayed_fps = fps;
+            self.invalidate_debug_text();
+        }
+    }
+
+    pub fn invalidate_debug_text(&mut self) {
+        self.debug_text_stale = true;
     }
 
     fn fixup_fog_and_render_distances(&mut self) {
@@ -390,6 +464,50 @@ impl Renderer {
         }
     }
 
+    fn draw_debug_text(&mut self) -> MResult<()> {
+        let Some(f) = self.debug_font.as_ref() else {
+            return Ok(())
+        };
+
+        let font = self.fonts.get(f).expect("selected debug font no longer loaded?");
+        let request = FontDrawRequest {
+            alignment: TextAlignment::Left,
+            color: [1.0, 1.0, 1.0, 1.0],
+            // TODO: determine how resolution will work
+            ..FontDrawRequest::default()
+        };
+
+        let mut text = String::with_capacity(1024);
+
+        std::fmt::write(&mut text, format_args!("FPS: {fps:.03}\nBSP: {bsp}\n\n",
+                                                fps=self.displayed_fps,
+                                                bsp=self.current_bsp.as_ref().map(|b| {
+                                                    let bsp = b.as_str();
+                                                    match bsp.rfind(".scenario_structure_bsp") {
+                                                        Some(b) => &bsp[..b],
+                                                        None => bsp
+                                                    }
+                                                }).unwrap_or("No BSP loaded!"))).unwrap();
+
+        for (index, viewport) in self.player_viewports.iter().enumerate() {
+            std::fmt::write(&mut text, format_args!("Viewport #{index}\n")).unwrap();
+            std::fmt::write(&mut text, format_args!("  X: {:12.07}\n", viewport.camera.position[0])).unwrap();
+            std::fmt::write(&mut text, format_args!("  Y: {:12.07}\n", viewport.camera.position[1])).unwrap();
+            std::fmt::write(&mut text, format_args!("  Z: {:12.07}\n", viewport.camera.position[2])).unwrap();
+            std::fmt::write(&mut text, format_args!("\n")).unwrap();
+        }
+
+        let parameter = font.draw_string_to_bitmap(&text, request);
+        let bitmap = Bitmap::load_from_parameters(self, parameter)?;
+        self.debug_text.push_back(bitmap);
+
+        if self.debug_text.len() == self.debug_text.capacity() {
+            self.debug_text.pop_front();
+        }
+
+        Ok(())
+    }
+
     fn get_default_2d(&self, default_type: DefaultType) -> &BitmapBitmap {
         &self.bitmaps[&self.default_bitmaps.default_2d].bitmaps[default_type as usize]
     }
@@ -447,4 +565,4 @@ enum DefaultType {
 }
 
 /// Describes the default background color and clear color.
-const DEFAULT_BACKGROUND: [f32; 4] = [0.0f32, 0.0, 0.0, 1.0];
+const DEFAULT_BACKGROUND: FloatColor = [0.0f32, 0.0, 0.0, 1.0];

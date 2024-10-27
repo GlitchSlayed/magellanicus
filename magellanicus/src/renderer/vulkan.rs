@@ -9,6 +9,14 @@ mod helper;
 mod player_viewport;
 mod vertex;
 mod material;
+mod font;
+
+pub use bitmap::*;
+pub use bsp::*;
+pub use geometry::*;
+pub use material::*;
+pub use pipeline::*;
+pub use font::*;
 
 use crate::error::{Error, MResult};
 use crate::renderer::data::{BSPGeometry, BSP, MAX_DRAW_DISTANCE_LIMIT};
@@ -17,12 +25,7 @@ use crate::renderer::vulkan::helper::{build_swapchain, LoadedVulkan};
 use crate::renderer::vulkan::vertex::{VulkanFogData, VulkanModelData, VulkanModelVertex};
 use crate::renderer::{Camera, FogData, Renderer, RendererParameters, Resolution, MSAA};
 use crate::vertex::VertexOffsets;
-pub use bitmap::*;
-pub use bsp::*;
-pub use geometry::*;
 use glam::{Mat3, Mat4, Vec3};
-pub use material::*;
-pub use pipeline::*;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::boxed::Box;
 use std::collections::BTreeMap;
@@ -31,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::vec::Vec;
 use std::{eprintln, format, println, vec};
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, ClearDepthStencilImageInfo, CommandBufferInheritanceInfo, CommandBufferInheritanceRenderPassType, CommandBufferInheritanceRenderingInfo, CommandBufferUsage, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderPassBeginInfo, RenderingAttachmentInfo, RenderingInfo, ResolveImageInfo, SecondaryAutoCommandBuffer, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
 use vulkano::descriptor_set::allocator::{StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo};
@@ -51,6 +54,7 @@ use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp, Framebuffer, Fra
 use vulkano::swapchain::{acquire_next_image, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 use vulkano::{single_pass_renderpass, Validated, ValidationError, VulkanError};
+use crate::FloatColor;
 
 pub(crate) static OFFLINE_PIPELINE_COLOR_FORMAT: Format = Format::R8G8B8A8_UNORM;
 
@@ -68,7 +72,8 @@ pub struct VulkanRenderer {
     surface: Arc<Surface>,
     swapchain_image_views: Vec<Arc<SwapchainImages>>,
     default_2d_sampler: Arc<Sampler>,
-    samples_per_pixel: SampleCount
+    samples_per_pixel: SampleCount,
+    default_box_indices: Subbuffer<[u16]>
 }
 
 #[derive(Clone)]
@@ -193,6 +198,16 @@ impl VulkanRenderer {
             }
         )?;
 
+        let default_box_indices = Buffer::from_iter(
+            memory_allocator.clone(),
+            BufferCreateInfo {
+                usage: BufferUsage::INDEX_BUFFER,
+                ..Default::default()
+            },
+            default_allocation_create_info(),
+            [0u16,1,2,0,2,3]
+        )?;
+
         Ok(Self {
             current_resolution: renderer_parameters.resolution,
             instance,
@@ -207,7 +222,8 @@ impl VulkanRenderer {
             swapchain_image_views,
             memory_allocator,
             default_2d_sampler,
-            samples_per_pixel
+            samples_per_pixel,
+            default_box_indices
         })
     }
 
@@ -416,6 +432,13 @@ impl VulkanRenderer {
         if renderer.player_viewports.len() > 1 {
             images.begin_rendering(&mut command_builder);
             Self::draw_split_screen_bars(renderer, &mut command_builder, width, height);
+            images.end_rendering(&mut command_builder);
+        }
+
+        if renderer.debug_font.is_some() {
+            let debug_data = renderer.debug_text.iter().last().expect("where????");
+            images.begin_rendering(&mut command_builder);
+            draw_sprite(renderer, 0.0, 0.0, (renderer.renderer.current_resolution.height as f32) / 480.0, &debug_data.bitmaps[0].vulkan.image, &mut command_builder).expect("could not draw debug shit");
             images.end_rendering(&mut command_builder);
         }
 
@@ -861,17 +884,84 @@ fn make_model_view_uniform(
     ).unwrap()
 }
 
-fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color: [f32; 4], command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) -> MResult<()> {
-    let indices = Buffer::from_iter(
+fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color: FloatColor, command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) -> MResult<()> {
+    let vertices = generate_box(renderer, x, y, width, height);
+
+    let pipeline = renderer
+        .renderer
+        .pipelines[&VulkanPipelineType::ColorBox]
+        .get_pipeline();
+
+    let uniform_buffer = Buffer::from_data(
         renderer.renderer.memory_allocator.clone(),
-        BufferCreateInfo {
-            usage: BufferUsage::INDEX_BUFFER,
-            ..Default::default()
-        },
+        BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
         default_allocation_create_info(),
-        [0u16,1,2,0,2,3]
-    )?;
-    let vertices = Buffer::from_iter(
+        color
+    ).unwrap();
+
+    let set = PersistentDescriptorSet::new(
+        renderer.renderer.descriptor_set_allocator.as_ref(),
+        pipeline.layout().set_layouts()[1].clone(),
+        [
+            WriteDescriptorSet::buffer(0, uniform_buffer),
+        ],
+        []
+    ).unwrap();
+
+    command_builder.bind_descriptor_sets(
+        PipelineBindPoint::Graphics,
+        pipeline.layout().clone(),
+        1,
+        set
+    ).unwrap();
+
+    command_builder.set_cull_mode(CullMode::None).unwrap();
+    command_builder.bind_index_buffer(renderer.renderer.default_box_indices.clone()).unwrap();
+    command_builder.bind_vertex_buffers(0, vertices).unwrap();
+    command_builder.bind_pipeline_graphics(pipeline).unwrap();
+    command_builder.draw_indexed(6, 1, 0, 0, 0).unwrap();
+
+    Ok(())
+}
+
+fn draw_sprite(renderer: &Renderer, x: f32, y: f32, scale: f32, bitmap: &Arc<Image>, command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) -> MResult<()> {
+    let pipeline = renderer
+        .renderer
+        .pipelines[&VulkanPipelineType::DrawSprite]
+        .get_pipeline();
+
+    let set = PersistentDescriptorSet::new(
+        renderer.renderer.descriptor_set_allocator.as_ref(),
+        pipeline.layout().set_layouts()[0].clone(),
+        [
+            WriteDescriptorSet::sampler(0, renderer.renderer.default_2d_sampler.clone()),
+            WriteDescriptorSet::image_view(1, ImageView::new_default(bitmap.clone())?),
+        ],
+        []
+    ).unwrap();
+
+    let [width, height, _] = bitmap.extent();
+    let width = width as f32 * scale / (renderer.renderer.current_resolution.width as f32);
+    let height = height as f32 * scale / (renderer.renderer.current_resolution.height as f32);
+
+    let vertices = generate_box(renderer, x, y, width, height);
+
+    command_builder.set_cull_mode(CullMode::None).unwrap();
+    command_builder.bind_index_buffer(renderer.renderer.default_box_indices.clone()).unwrap();
+    command_builder.bind_vertex_buffers(0, vertices).unwrap();
+    command_builder.bind_descriptor_sets(
+        PipelineBindPoint::Graphics,
+        pipeline.layout().clone(),
+        0,
+        set
+    ).unwrap();
+    command_builder.bind_pipeline_graphics(pipeline).unwrap();
+    command_builder.draw_indexed(6, 1, 0, 0, 0).unwrap();
+    Ok(())
+}
+
+fn generate_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32) -> Subbuffer<[VulkanModelVertex]> {
+    Buffer::from_iter(
         renderer.renderer.memory_allocator.clone(),
         BufferCreateInfo {
             usage: BufferUsage::VERTEX_BUFFER,
@@ -904,41 +994,5 @@ fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color:
                 tangent: [1.0, 0.0, 0.0]
             }
         ]
-    )?;
-
-    let pipeline = renderer
-        .renderer
-        .pipelines[&VulkanPipelineType::ColorBox]
-        .get_pipeline();
-
-    let uniform_buffer = Buffer::from_data(
-        renderer.renderer.memory_allocator.clone(),
-        BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
-        default_allocation_create_info(),
-        color
-    ).unwrap();
-
-    let set = PersistentDescriptorSet::new(
-        renderer.renderer.descriptor_set_allocator.as_ref(),
-        pipeline.layout().set_layouts()[1].clone(),
-        [
-            WriteDescriptorSet::buffer(0, uniform_buffer),
-        ],
-        []
-    ).unwrap();
-
-    command_builder.bind_descriptor_sets(
-        PipelineBindPoint::Graphics,
-        pipeline.layout().clone(),
-        1,
-        set
-    ).unwrap();
-
-    command_builder.set_cull_mode(CullMode::None).unwrap();
-    command_builder.bind_index_buffer(indices).unwrap();
-    command_builder.bind_vertex_buffers(0, vertices).unwrap();
-    command_builder.bind_pipeline_graphics(pipeline).unwrap();
-    command_builder.draw_indexed(6, 1, 0, 0, 0).unwrap();
-
-    Ok(())
+    ).expect("failed to make a simple box :(")
 }

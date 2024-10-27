@@ -3,12 +3,14 @@ mod geometry;
 mod shader;
 mod bsp;
 mod sky;
+mod font;
 
 pub use bitmap::*;
 pub use geometry::*;
 pub use shader::*;
 pub use bsp::*;
 pub use sky::*;
+pub use font::*;
 
 /// Used for initializing a renderer.
 ///
@@ -55,7 +57,7 @@ pub enum MSAA {
 impl Default for RendererParameters {
     fn default() -> Self {
         Self {
-            resolution: Resolution { width: 640, height: 480 },
+            resolution: Resolution::default(),
             number_of_viewports: 1,
             vsync: false,
             msaa: Default::default(),
@@ -69,4 +71,10 @@ impl Default for RendererParameters {
 pub struct Resolution {
     pub width: u32,
     pub height: u32
+}
+
+impl Default for Resolution {
+    fn default() -> Self {
+        Self { width: 640, height: 480 }
+    }
 }

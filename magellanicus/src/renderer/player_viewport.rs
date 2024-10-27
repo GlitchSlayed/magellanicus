@@ -62,7 +62,7 @@ impl Default for PlayerViewport {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Camera {
     /// Vertical FoV in radians
     pub fov: f32,

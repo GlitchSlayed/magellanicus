@@ -1,18 +1,18 @@
 #![allow(dead_code)]
 
-use magellanicus::renderer::{get_default_vertical_fov, AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, FogData, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
+use magellanicus::renderer::{get_default_vertical_fov, AddBSPParameter, AddBSPParameterLightmapMaterial, AddBSPParameterLightmapSet, AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddFontParameter, AddFontParameterCharacter, AddShaderBasicShaderData, AddShaderData, AddShaderEnvironmentShaderData, AddShaderParameter, AddShaderTransparentChicagoShaderData, AddShaderTransparentChicagoShaderMap, AddSkyParameter, BSP3DNode, BSP3DNodeChild, BSP3DPlane, BSPCluster, BSPData, BSPLeaf, BSPPortal, BSPSubcluster, BitmapFormat, BitmapSprite, BitmapType, FogData, Renderer, RendererParameters, Resolution, ShaderType, MSAA};
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver};
 use std::time::Instant;
 
 use clap::Parser;
 use glam::Vec3;
 use magellanicus::vertex::{LightmapVertex, ModelTriangle, ModelVertex};
-use ringhopper::definitions::{Bitmap, BitmapDataFormat, BitmapDataType, Scenario, ScenarioStructureBSP, ShaderEnvironment, ShaderModel, ShaderTransparentChicago, ShaderTransparentChicagoExtended, ShaderTransparentChicagoMap, ShaderTransparentGeneric, ShaderTransparentGlass, ShaderTransparentMeter, Sky, UnicodeStringList};
+use ringhopper::definitions::{Bitmap, BitmapDataFormat, BitmapDataType, Font, Globals, Scenario, ScenarioStructureBSP, ShaderEnvironment, ShaderModel, ShaderTransparentChicago, ShaderTransparentChicagoExtended, ShaderTransparentChicagoMap, ShaderTransparentGeneric, ShaderTransparentGlass, ShaderTransparentMeter, Sky, UnicodeStringList};
 use ringhopper::primitives::dynamic::DynamicTagDataArray;
 use ringhopper::primitives::engine::Engine;
 use ringhopper::primitives::primitive::{TagGroup, TagPath};
@@ -251,14 +251,14 @@ fn main() -> Result<(), String> {
         pause_rendering_flag: Arc::new(AtomicBool::new(false)),
     };
 
-    let (fps_send, fps_receive) = channel::<f64>();
     let (camera_send, camera_receive) = channel::<(f32, f32, usize)>();
-    handler.initialize_and_start(camera_receive, fps_send)?;
+    handler.initialize_and_start(camera_receive)?;
 
     window.show();
     mouse.capture(true);
     mouse.set_relative_mouse_mode(true);
 
+    let mut f3 = false;
     let mut w = false;
     let mut a = false;
     let mut s = false;
@@ -286,9 +286,6 @@ fn main() -> Result<(), String> {
     let shift_speedup = 4.0;
 
     loop {
-        if let Ok(frames_per_second) = fps_receive.try_recv() {
-            println!("FPS: {frames_per_second}");
-        }
         let Some(event) = events.wait_event_timeout(1000) else {
             continue;
         };
@@ -312,6 +309,17 @@ fn main() -> Result<(), String> {
                 if keycode == Some(Keycode::Tab) {
                     viewport_mod = (viewport_mod + 1) % viewports;
                     continue;
+                }
+
+                if keycode == Some(Keycode::F3) {
+                    let mut locked = handler.lock_renderer();
+                    let globals: &Globals = handler.scenario_data.tags.get(
+                        &TagPath::from_path("globals\\globals.globals").unwrap()
+                    ).expect("no globals???").get_ref().unwrap();
+
+                    let font_terminal = globals.interface_bitmaps.items[0].font_terminal.to_string();
+                    f3 = !f3;
+                    locked.renderer.set_debug_font(f3.then_some(font_terminal.as_str())).expect("F3 fail");
                 }
 
                 if keycode == Some(Keycode::PageUp) || keycode == Some(Keycode::PageDown) {
@@ -338,9 +346,6 @@ fn main() -> Result<(), String> {
 
                     let path = path.as_ref().map(|p| p.as_str());
                     handler.lock_renderer().renderer.set_current_bsp(path).unwrap();
-
-                    println!("Changing BSP to #{current_bsp_index} ({})", path.unwrap_or("<no BSP loaded>"));
-
                     continue;
                 }
 
@@ -586,7 +591,7 @@ impl FlycamTestHandler {
         }
     }
 
-    fn initialize_and_start(&mut self, camera_rotation_channel: Receiver<(f32, f32, usize)>, fps_channel: Sender<f64>) -> Result<(), String> {
+    fn initialize_and_start(&mut self, camera_rotation_channel: Receiver<(f32, f32, usize)>) -> Result<(), String> {
         if let Err(e) = self.load_bitmaps() {
             return Err(format!("ERROR LOADING BITMAPS: {e}"))
         }
@@ -597,6 +602,10 @@ impl FlycamTestHandler {
 
         if let Err(e) = self.load_skies() {
             return Err(format!("ERROR LOADING skies: {e}"))
+        }
+
+        if let Err(e) = self.load_fonts() {
+            return Err(format!("ERROR LOADING fonts: {e}"))
         }
 
         if let Err(e) = self.load_bsps() {
@@ -640,7 +649,7 @@ impl FlycamTestHandler {
         let pause_rendering_ref = self.pause_rendering_flag.clone();
         let velocity = self.camera_velocity.clone();
         std::thread::spawn(move || {
-            run_renderer_thread(render_ref, pause_rendering_ref, velocity, camera_rotation_channel, fps_channel);
+            run_renderer_thread(render_ref, pause_rendering_ref, velocity, camera_rotation_channel);
         });
 
         Ok(())
@@ -927,6 +936,47 @@ impl FlycamTestHandler {
         Ok(())
     }
 
+    fn load_fonts(&mut self) -> Result<(), String> {
+        let mut renderer = self.renderer.as_mut().unwrap().lock().unwrap();
+        let renderer = &mut *renderer;
+
+        let all_fonts = self.scenario_data
+            .tags
+            .iter()
+            .filter(|f| f.0.group() == TagGroup::Font);
+
+        for (path, tag) in all_fonts {
+            Self::load_font(renderer, path, tag.get_ref().unwrap()).map_err(|e| format!("Failed to load font {path}: {e}"))?;
+        }
+
+        Ok(())
+    }
+
+    fn load_font(renderer: &mut Renderer, path: &TagPath, font: &Font) -> Result<(), String> {
+        renderer.add_font(&path.to_string(), AddFontParameter {
+            line_height: (font.ascending_height + font.descending_height) as u32,
+            characters: font.characters.items.iter().filter_map(|c| {
+                let width = c.bitmap_width as usize;
+                let height = c.bitmap_height as usize;
+
+                let start = c.pixels_offset as usize;
+                let end = start.checked_add(width * height)?;
+
+                let data = font.pixels.bytes.get(start..end)?;
+
+                let character = AddFontParameterCharacter {
+                    characters: char::try_from(c.character as u32).ok()?,
+                    data: data.to_vec(),
+                    width,
+                    height,
+                    advance_x: c.character_width as i32
+                };
+
+                Some(character)
+            }).collect()
+        }).map_err(|e| e.to_string())
+    }
+
     fn load_sky(renderer: &mut Renderer, path: &TagPath, sky: &Sky) -> Result<(), String> {
         renderer.add_sky(&path.to_string(), AddSkyParameter {
             geometry: None,
@@ -1075,7 +1125,7 @@ impl FlycamTestHandler {
     }
 }
 
-fn run_renderer_thread(renderer: Weak<Mutex<Renderer>>, pause_rendering: Arc<AtomicBool>, velocity: Arc<[[AtomicU32; 4]; 4]>, camera_channel: Receiver<(f32, f32, usize)>, fps_channel: Sender<f64>) {
+fn run_renderer_thread(renderer: Weak<Mutex<Renderer>>, pause_rendering: Arc<AtomicBool>, velocity: Arc<[[AtomicU32; 4]; 4]>, camera_channel: Receiver<(f32, f32, usize)>) {
     let time_start = Instant::now();
     let mut last_loop = 0.0;
     let mut time_since_last_fps = Instant::now();
@@ -1124,7 +1174,6 @@ fn run_renderer_thread(renderer: Weak<Mutex<Renderer>>, pause_rendering: Arc<Ato
         last_loop = ms_since_start;
 
         let frame_result = renderer.draw_frame();
-        drop(renderer);
 
         match frame_result {
             Ok(n) => {
@@ -1142,10 +1191,12 @@ fn run_renderer_thread(renderer: Weak<Mutex<Renderer>>, pause_rendering: Arc<Ato
         let time_taken = Instant::now() - time_since_last_fps;
         if time_taken.as_secs() >= 1 {
             let frames_per_second = (frames_rendered as f64) / (time_taken.as_micros() as f64 / 1000000.0);
-            let _ = fps_channel.send(frames_per_second);
-            frames_rendered = 0;
+            renderer.set_debug_fps(frames_per_second as f32);
             time_since_last_fps = Instant::now();
+            frames_rendered = 0;
         }
+
+        drop(renderer);
     }
 }
 

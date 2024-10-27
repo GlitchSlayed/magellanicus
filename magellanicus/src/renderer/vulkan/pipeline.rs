@@ -12,6 +12,7 @@ mod pipeline_loader;
 mod color_box;
 pub mod shader_environment;
 pub mod shader_transparent_chicago;
+mod draw_sprite;
 
 pub trait VulkanPipelineData: Send + Sync + 'static {
     fn get_pipeline(&self) -> Arc<GraphicsPipeline>;
@@ -69,6 +70,8 @@ pub fn load_all_pipelines(swapchain_images: &SwapchainImages, device: Arc<Device
     pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoComponentMax, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(component_max))?));
     pipelines.insert(VulkanPipelineType::ShaderTransparentChicagoMultiply, Arc::new(shader_transparent_chicago::ShaderTransparentChicago::new(swapchain_images, device.clone(), Some(multiply))?));
 
+    pipelines.insert(VulkanPipelineType::DrawSprite, Arc::new(draw_sprite::DrawSprite::new(swapchain_images, device.clone())?));
+
     Ok(pipelines)
 }
 
@@ -100,5 +103,8 @@ pub enum VulkanPipelineType {
     /// shader_transparent_chicago + Component Max
     ShaderTransparentChicagoComponentMax,
     /// shader_transparent_chicago + Multiply
-    ShaderTransparentChicagoMultiply
+    ShaderTransparentChicagoMultiply,
+
+    /// Draws a sprite to the screen.
+    DrawSprite
 }
