@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use alloc::format;
 use alloc::vec;
 use alloc::borrow::ToOwned;
-use std::collections::VecDeque;
+use alloc::collections::VecDeque;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use data::*;
 
@@ -470,17 +470,44 @@ impl Renderer {
         };
 
         let font = self.fonts.get(f).expect("selected debug font no longer loaded?");
+
+        let mut text = String::with_capacity(1024);
+
+        let fps = self.displayed_fps;
+        let fps_ms = 1000.0 / fps;
+
+        let max = 12.0;
+        let min = 1.0;
+        let half_high = 7.5;
+        let half_low = 2.0;
+
+        let color = if fps_ms > max {
+            [1.0, 0.0, 0.0, 1.0]
+        }
+        else if fps_ms > half_high {
+            let d = (fps_ms - half_high) / (max - half_high);
+            [1.0, 1.0 - d*d*d, 0.0, 1.0]
+        }
+        else if fps_ms > half_low {
+            let d = (fps_ms - half_low) / (half_high - half_low);
+            [d.sqrt().sqrt(), 1.0, 0.0, 1.0]
+        }
+        else if fps_ms > min {
+            let d = (fps_ms - min) / (half_low - min);
+            [0.0, 1.0, 1.0 - d*d*d, 1.0]
+        }
+        else {
+            [0.0, 1.0, 1.0, 1.0]
+        };
+
         let request = FontDrawRequest {
             alignment: TextAlignment::Left,
-            color: [1.0, 1.0, 1.0, 1.0],
+            color,
             // TODO: determine how resolution will work
             ..FontDrawRequest::default()
         };
 
-        let mut text = String::with_capacity(1024);
-
-        std::fmt::write(&mut text, format_args!("FPS: {fps:.03}\nBSP: {bsp}\n\n",
-                                                fps=self.displayed_fps,
+        std::fmt::write(&mut text, format_args!("FPS: {fps:-7.03} ({fps_ms} ms / frame)\n^7BSP: {bsp}\n\n",
                                                 bsp=self.current_bsp.as_ref().map(|b| {
                                                     let bsp = b.as_str();
                                                     match bsp.rfind(".scenario_structure_bsp") {

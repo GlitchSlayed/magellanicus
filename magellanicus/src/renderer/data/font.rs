@@ -6,7 +6,6 @@ use core::iter::FusedIterator;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Range;
-use std::println;
 use glam::Vec4;
 use crate::error::MResult;
 use crate::FloatColor;
@@ -67,11 +66,12 @@ impl Font {
         };
 
         let mut bitmap_data: Vec<FloatColor> = vec![[0f32; 4]; pixel_count as usize];
-        let characters: Vec<FontCharacterIterated> = self.iterate_characters(string, request.color, TextState {
+        let mut characters = Vec::with_capacity(1024);
+        characters.extend(self.iterate_characters(string, request.color, TextState {
             default_alignment: request.alignment,
             current_alignment: None,
             ..Default::default()
-        }).collect();
+        }));
 
         let mut current_line_range = 1..usize::MAX;
         let mut offset_x = 0i32;
@@ -286,7 +286,6 @@ impl<'font, 'string> Iterator for FontCharacterIterator<'font, 'string> {
                     };
                     match code {
                         ControlCode::Color([r, g, b]) => {
-                            println!("{r} {g} {b}");
                             self.modified_color = [*r, *g, *b, self.modified_color[3]]
                         },
                         ControlCode::ResetColor => self.modified_color = self.original_color
