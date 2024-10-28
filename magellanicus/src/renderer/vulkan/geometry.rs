@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use crate::vertex::{LightmapVertex, ModelVertex, ModelTriangle};
-use std::vec::Vec;
 use crate::error::{Error, MResult};
 use crate::renderer::vulkan::vertex::*;
 

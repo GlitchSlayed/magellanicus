@@ -1,6 +1,4 @@
-use alloc::vec::Vec;
 use crate::error::{Error, MResult};
-use alloc::format;
 
 pub struct AddFontParameter {
     pub characters: Vec<AddFontParameterCharacter>,

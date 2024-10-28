@@ -1,10 +1,8 @@
+use std::sync::Arc;
 use crate::error::MResult;
 use crate::renderer::vulkan::VulkanBSPData;
 use crate::renderer::{AddBSPParameter, AddBSPParameterLightmapMaterial, BSPData, Renderer};
 use crate::vertex::VertexOffsets;
-use alloc::vec::Vec;
-use alloc::sync::Arc;
-use alloc::string::String;
 
 pub const MIN_DRAW_DISTANCE_LIMIT: f32 = 100.0;
 pub const MAX_DRAW_DISTANCE_LIMIT: f32 = 2250.0;

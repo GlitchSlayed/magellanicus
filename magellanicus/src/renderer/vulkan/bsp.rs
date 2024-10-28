@@ -59,7 +59,7 @@ impl VulkanBSPData {
             }
         }
 
-        let shader_environment_pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
+        let shader_environment_pipeline = renderer.vulkan.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
         let mut images = BTreeMap::new();
         if let Some(n) = &param.lightmap_bitmap {
             let image = renderer
@@ -80,7 +80,7 @@ impl VulkanBSPData {
                 )?;
 
                 let sampler = Sampler::new(
-                    renderer.renderer.device.clone(),
+                    renderer.vulkan.device.clone(),
                     SamplerCreateInfo {
                         address_mode: [
                             SamplerAddressMode::ClampToEdge,
@@ -92,7 +92,7 @@ impl VulkanBSPData {
                 )?;
 
                 let descriptor_set = PersistentDescriptorSet::new(
-                    renderer.renderer.descriptor_set_allocator.as_ref(),
+                    renderer.vulkan.descriptor_set_allocator.as_ref(),
                     shader_environment_pipeline.layout().set_layouts()[1].clone(),
                     [
                         WriteDescriptorSet::sampler(0, sampler),
@@ -106,10 +106,10 @@ impl VulkanBSPData {
         }
 
         let null_set = PersistentDescriptorSet::new(
-            renderer.renderer.descriptor_set_allocator.as_ref(),
+            renderer.vulkan.descriptor_set_allocator.as_ref(),
             shader_environment_pipeline.layout().set_layouts()[1].clone(),
             [
-                WriteDescriptorSet::sampler(0, renderer.renderer.default_2d_sampler.clone()),
+                WriteDescriptorSet::sampler(0, renderer.vulkan.default_2d_sampler.clone()),
                 WriteDescriptorSet::image_view(1, ImageView::new_default(renderer.get_default_2d(DefaultType::White).vulkan.image.clone())?),
             ],
             []
@@ -140,7 +140,7 @@ impl VulkanBSPData {
 
         let subbuffers = if !indices.is_empty() {
             let vertex_data_subbuffer = Buffer::from_iter(
-                renderer.renderer.memory_allocator.clone(),
+                renderer.vulkan.memory_allocator.clone(),
                 BufferCreateInfo {
                     usage: BufferUsage::VERTEX_BUFFER,
                     ..Default::default()
@@ -150,7 +150,7 @@ impl VulkanBSPData {
             )?;
 
             let texture_coords_subbuffer = Buffer::from_iter(
-                renderer.renderer.memory_allocator.clone(),
+                renderer.vulkan.memory_allocator.clone(),
                 BufferCreateInfo {
                     usage: BufferUsage::VERTEX_BUFFER,
                     ..Default::default()
@@ -160,7 +160,7 @@ impl VulkanBSPData {
             )?;
 
             let lightmap_texture_coords_subbuffer = Buffer::from_iter(
-                renderer.renderer.memory_allocator.clone(),
+                renderer.vulkan.memory_allocator.clone(),
                 BufferCreateInfo {
                     usage: BufferUsage::VERTEX_BUFFER,
                     ..Default::default()
@@ -170,7 +170,7 @@ impl VulkanBSPData {
             )?;
 
             let index_subbuffer = Buffer::from_iter(
-                renderer.renderer.memory_allocator.clone(),
+                renderer.vulkan.memory_allocator.clone(),
                 BufferCreateInfo {
                     usage: BufferUsage::INDEX_BUFFER,
                     ..Default::default()

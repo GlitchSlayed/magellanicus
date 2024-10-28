@@ -1,11 +1,5 @@
-use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
-use alloc::string::String;
-use alloc::vec::Vec;
-use alloc::format;
-use alloc::vec;
-use alloc::borrow::ToOwned;
-use alloc::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use data::*;
 
@@ -27,15 +21,15 @@ mod data;
 mod player_viewport;
 
 pub struct Renderer {
-    renderer: VulkanRenderer,
+    vulkan: VulkanRenderer,
     player_viewports: Vec<PlayerViewport>,
 
-    bitmaps: BTreeMap<Arc<String>, Bitmap>,
-    shaders: BTreeMap<Arc<String>, Shader>,
-    geometries: BTreeMap<Arc<String>, Geometry>,
-    skies: BTreeMap<Arc<String>, Sky>,
-    bsps: BTreeMap<Arc<String>, Arc<BSP>>,
-    fonts: BTreeMap<Arc<String>, Font>,
+    bitmaps: HashMap<Arc<String>, Bitmap>,
+    shaders: HashMap<Arc<String>, Shader>,
+    geometries: HashMap<Arc<String>, Geometry>,
+    skies: HashMap<Arc<String>, Sky>,
+    bsps: HashMap<Arc<String>, Arc<BSP>>,
+    fonts: HashMap<Arc<String>, Font>,
 
     default_bitmaps: DefaultBitmaps,
     current_bsp: Option<Arc<String>>,
@@ -118,14 +112,14 @@ impl Renderer {
         }
 
         let mut result = Self {
-            renderer: VulkanRenderer::new(&parameters, surface)?,
+            vulkan: VulkanRenderer::new(&parameters, surface)?,
             player_viewports,
-            bitmaps: BTreeMap::new(),
-            shaders: BTreeMap::new(),
-            geometries: BTreeMap::new(),
-            skies: BTreeMap::new(),
-            bsps: BTreeMap::new(),
-            fonts: BTreeMap::new(),
+            bitmaps: HashMap::new(),
+            shaders: HashMap::new(),
+            geometries: HashMap::new(),
+            skies: HashMap::new(),
+            bsps: HashMap::new(),
+            fonts: HashMap::new(),
             current_bsp: None,
             default_bitmaps: DefaultBitmaps::default(),
             displayed_fps: 0.0,
@@ -310,7 +304,7 @@ impl Renderer {
         if parameters.resolution.height == 0 || parameters.resolution.width == 0 {
             return Err(Error::DataError { error: "resolution has 0 on one or more dimensions".to_owned() })
         }
-        self.renderer.rebuild_swapchain(
+        self.vulkan.rebuild_swapchain(
             &parameters
         )
     }

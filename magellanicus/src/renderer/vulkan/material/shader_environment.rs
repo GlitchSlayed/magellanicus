@@ -51,7 +51,7 @@ impl VulkanShaderEnvironmentMaterial {
             .clone();
 
         let pipeline = renderer
-            .renderer
+            .vulkan
             .pipelines[&VulkanPipelineType::ShaderEnvironment]
             .clone();
 
@@ -73,7 +73,7 @@ impl VulkanShaderEnvironmentMaterial {
             perpendicular_color: [add_shader_parameter.perpendicular_color[0], add_shader_parameter.perpendicular_color[1], add_shader_parameter.perpendicular_color[2], add_shader_parameter.perpendicular_brightness],
         };
 
-        let map_sampler = renderer.renderer.default_2d_sampler.clone();
+        let map_sampler = renderer.vulkan.default_2d_sampler.clone();
         let base_map = ImageView::new_default(base_map)?;
         let primary_detail_map = ImageView::new_default(primary_detail_map)?;
         let secondary_detail_map = ImageView::new_default(secondary_detail_map)?;
@@ -88,14 +88,14 @@ impl VulkanShaderEnvironmentMaterial {
         )?;
 
         let uniform_buffer = Buffer::from_data(
-            renderer.renderer.memory_allocator.clone(),
+            renderer.vulkan.memory_allocator.clone(),
             BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
             default_allocation_create_info(),
             uniform
         )?;
 
         let descriptor_set = PersistentDescriptorSet::new(
-            renderer.renderer.descriptor_set_allocator.as_ref(),
+            renderer.vulkan.descriptor_set_allocator.as_ref(),
             pipeline.get_pipeline().layout().set_layouts()[3].clone(),
             [
                 WriteDescriptorSet::buffer(0, uniform_buffer),
@@ -127,7 +127,7 @@ impl VulkanMaterial for VulkanShaderEnvironmentMaterial {
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
         if !repeat_shader {
-            let pipeline = renderer.renderer.pipelines.get(&self.get_main_pipeline()).unwrap();
+            let pipeline = renderer.vulkan.pipelines.get(&self.get_main_pipeline()).unwrap();
             to.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
                 pipeline.get_pipeline().layout().clone(),

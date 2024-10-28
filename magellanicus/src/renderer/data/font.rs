@@ -1,11 +1,9 @@
 mod colors;
 
-use alloc::collections::BTreeMap;
-use core::str::Chars;
-use core::iter::FusedIterator;
-use alloc::vec;
-use alloc::vec::Vec;
-use core::ops::Range;
+use std::collections::HashMap;
+use std::iter::FusedIterator;
+use std::ops::Range;
+use std::str::Chars;
 use glam::Vec4;
 use crate::error::MResult;
 use crate::FloatColor;
@@ -14,7 +12,7 @@ use crate::renderer::data::font::colors::{ControlCode, ColorCodes};
 
 pub struct Font {
     pub line_height: u32,
-    pub characters: BTreeMap<char, FontCharacter>,
+    pub characters: HashMap<char, FontCharacter>,
     pub colors: ColorCodes
 }
 

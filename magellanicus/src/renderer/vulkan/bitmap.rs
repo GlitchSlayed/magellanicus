@@ -3,7 +3,6 @@ use crate::renderer::mipmap_iterator::{MipmapFaceIterator, MipmapMetadata, Mipma
 use crate::renderer::vulkan::{default_allocation_create_info, VulkanRenderer};
 use crate::renderer::{decode_p8_to_a8r8g8b8le, AddBitmapBitmapParameter, BitmapFormat, BitmapType};
 use std::num::NonZeroUsize;
-use std::println;
 use std::string::ToString;
 use std::sync::Arc;
 use std::vec::Vec;

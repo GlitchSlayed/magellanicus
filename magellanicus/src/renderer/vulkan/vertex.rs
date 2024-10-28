@@ -1,6 +1,5 @@
 use vulkano::buffer::BufferContents;
 use vulkano::pipeline::graphics::vertex_input::Vertex;
-use alloc::string::ToString;
 use vulkano::padded::Padded;
 
 #[derive(Copy, Clone, Debug)]

@@ -42,12 +42,12 @@ impl VulkanSimpleShaderMaterial {
             ..Default::default()
         })?;
 
-        let diffuse_sampler = renderer.renderer.default_2d_sampler.clone();
+        let diffuse_sampler = renderer.vulkan.default_2d_sampler.clone();
 
-        let pipeline = renderer.renderer.pipelines.get(&VulkanPipelineType::SimpleTexture).unwrap();
+        let pipeline = renderer.vulkan.pipelines.get(&VulkanPipelineType::SimpleTexture).unwrap();
 
         let descriptor_set = PersistentDescriptorSet::new(
-            renderer.renderer.descriptor_set_allocator.as_ref(),
+            renderer.vulkan.descriptor_set_allocator.as_ref(),
             pipeline.get_pipeline().layout().set_layouts()[3].clone(),
             [
                 WriteDescriptorSet::sampler(0, diffuse_sampler.clone()),
@@ -69,7 +69,7 @@ impl VulkanMaterial for VulkanSimpleShaderMaterial {
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
         if !repeat_shader {
-            let pipeline = renderer.renderer.pipelines.get(&self.get_main_pipeline()).unwrap();
+            let pipeline = renderer.vulkan.pipelines.get(&self.get_main_pipeline()).unwrap();
             to.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
                 pipeline.get_pipeline().layout().clone(),

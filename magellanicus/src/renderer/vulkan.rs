@@ -1,5 +1,3 @@
-use alloc::string::String;
-
 mod bitmap;
 mod geometry;
 mod pipeline;
@@ -11,6 +9,10 @@ mod vertex;
 mod material;
 mod font;
 
+use std::collections::BTreeMap;
+use std::fmt::Display;
+use std::sync::Arc;
+use std::time::Duration;
 pub use bitmap::*;
 pub use bsp::*;
 pub use geometry::*;
@@ -26,13 +28,6 @@ use crate::renderer::{Camera, FogData, Renderer, RendererParameters, Resolution,
 use crate::vertex::VertexOffsets;
 use glam::{Mat3, Mat4, Vec3};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use std::boxed::Box;
-use std::collections::BTreeMap;
-use std::fmt::Display;
-use std::sync::Arc;
-use std::time::Duration;
-use std::vec::Vec;
-use std::{eprintln, format, println, vec};
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, BlitImageInfo, ClearDepthStencilImageInfo, CommandBufferInheritanceInfo, CommandBufferInheritanceRenderPassType, CommandBufferInheritanceRenderingInfo, CommandBufferUsage, PrimaryAutoCommandBuffer, PrimaryCommandBufferAbstract, RenderPassBeginInfo, RenderingAttachmentInfo, RenderingInfo, ResolveImageInfo, SecondaryAutoCommandBuffer, SubpassBeginInfo, SubpassContents, SubpassEndInfo};
@@ -227,7 +222,7 @@ impl VulkanRenderer {
     }
 
     pub fn draw_frame(renderer: &mut Renderer) -> MResult<bool> {
-        let vulkan_renderer = &mut renderer.renderer;
+        let vulkan_renderer = &mut renderer.vulkan;
 
         let (image_index, suboptimal, acquire_future) =
             match acquire_next_image(vulkan_renderer.swapchain.clone(), None).map_err(Validated::unwrap) {
@@ -391,14 +386,14 @@ impl VulkanRenderer {
             .map(|b| b.clone());
 
         let mut command_builder = AutoCommandBufferBuilder::primary(
-            &renderer.renderer.command_buffer_allocator,
-            renderer.renderer.queue.queue_family_index(),
+            &renderer.vulkan.command_buffer_allocator,
+            renderer.vulkan.queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit
         ).expect("failed to init command builder");
 
-        let images = renderer.renderer.swapchain_image_views[image_index as usize].clone();
+        let images = renderer.vulkan.swapchain_image_views[image_index as usize].clone();
         image_future.wait(Some(Duration::from_millis(5000))).expect("waited too long");
-        renderer.renderer.future.as_mut().unwrap().cleanup_finished();
+        renderer.vulkan.future.as_mut().unwrap().cleanup_finished();
 
         let [width, height, ..] = images.color.image().extent();
         let (width, height) = (width as f32, height as f32);
@@ -437,7 +432,7 @@ impl VulkanRenderer {
         if renderer.debug_font.is_some() {
             let debug_data = renderer.debug_text.iter().last().expect("where????");
             images.begin_rendering(&mut command_builder);
-            draw_sprite(renderer, 0.0, 0.0, (renderer.renderer.current_resolution.height as f32) / 480.0, &debug_data.bitmaps[0].vulkan.image, &mut command_builder).expect("could not draw debug shit");
+            draw_sprite(renderer, 0.0, 0.0, (renderer.vulkan.current_resolution.height as f32) / 480.0, &debug_data.bitmaps[0].vulkan.image, &mut command_builder).expect("could not draw debug shit");
             images.end_rendering(&mut command_builder);
         }
 
@@ -458,18 +453,18 @@ impl VulkanRenderer {
 
         let commands = command_builder.build().expect("failed to build command builder");
 
-        let future = renderer.renderer
+        let future = renderer.vulkan
             .future
             .take()
             .expect("there's no future :(");
 
-        let swapchain_present = SwapchainPresentInfo::swapchain_image_index(renderer.renderer.swapchain.clone(), image_index);
+        let swapchain_present = SwapchainPresentInfo::swapchain_image_index(renderer.vulkan.swapchain.clone(), image_index);
 
         let future = future
             .join(image_future)
-            .then_execute(renderer.renderer.queue.clone(), commands.clone())
+            .then_execute(renderer.vulkan.queue.clone(), commands.clone())
             .expect("can't execute commands")
-            .then_swapchain_present(renderer.renderer.queue.clone(), swapchain_present)
+            .then_swapchain_present(renderer.vulkan.queue.clone(), swapchain_present)
             .then_signal_fence();
 
         loop {
@@ -484,7 +479,7 @@ impl VulkanRenderer {
                     continue;
                 },
                 Err(Validated::Error(VulkanError::OutOfDate)) => {
-                    renderer.renderer.future = Some(vulkano::sync::now(renderer.renderer.device.clone()).boxed_send_sync());
+                    renderer.vulkan.future = Some(vulkano::sync::now(renderer.vulkan.device.clone()).boxed_send_sync());
                     return false
                 },
                 Err(e) => {
@@ -493,7 +488,7 @@ impl VulkanRenderer {
             }
         }
 
-        renderer.renderer.future = Some(future.boxed_send_sync());
+        renderer.vulkan.future = Some(future.boxed_send_sync());
         true
     }
 
@@ -620,7 +615,7 @@ impl VulkanRenderer {
         };
         *last_shader = Some(this_shader);
 
-        let main_pipeline = renderer.renderer.pipelines.get(&shader.get_main_pipeline()).unwrap();
+        let main_pipeline = renderer.vulkan.pipelines.get(&shader.get_main_pipeline()).unwrap();
         let mut desired_lightmap = geometry.lightmap_index;
         if !camera.lightmaps {
             desired_lightmap = None;
@@ -813,7 +808,7 @@ fn make_fog_uniform(
     fog: &FogData
 ) -> Arc<PersistentDescriptorSet> {
     let pipeline = renderer
-        .renderer
+        .vulkan
         .pipelines[&VulkanPipelineType::ShaderEnvironment]
         .get_pipeline();
 
@@ -826,14 +821,14 @@ fn make_fog_uniform(
     };
 
     let fog_uniform_buffer = Buffer::from_data(
-        renderer.renderer.memory_allocator.clone(),
+        renderer.vulkan.memory_allocator.clone(),
         BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
         default_allocation_create_info(),
         fog_data
     ).unwrap();
 
     PersistentDescriptorSet::new(
-        renderer.renderer.descriptor_set_allocator.as_ref(),
+        renderer.vulkan.descriptor_set_allocator.as_ref(),
         pipeline.layout().set_layouts()[2].clone(),
         [
             WriteDescriptorSet::buffer(0, fog_uniform_buffer),
@@ -850,7 +845,7 @@ fn make_model_view_uniform(
     view: Mat4,
     proj: Mat4,
 ) -> Arc<PersistentDescriptorSet> {
-    let pipeline = renderer.renderer.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
+    let pipeline = renderer.vulkan.pipelines[&VulkanPipelineType::ShaderEnvironment].get_pipeline();
     let model = Mat4::IDENTITY;
 
     let model_data = VulkanModelData {
@@ -867,14 +862,14 @@ fn make_model_view_uniform(
     };
 
     let model_uniform_buffer = Buffer::from_data(
-        renderer.renderer.memory_allocator.clone(),
+        renderer.vulkan.memory_allocator.clone(),
         BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
         default_allocation_create_info(),
         model_data
     ).unwrap();
 
     PersistentDescriptorSet::new(
-        renderer.renderer.descriptor_set_allocator.as_ref(),
+        renderer.vulkan.descriptor_set_allocator.as_ref(),
         pipeline.layout().set_layouts()[0].clone(),
         [
             WriteDescriptorSet::buffer(0, model_uniform_buffer),
@@ -887,19 +882,19 @@ fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color:
     let vertices = generate_box(renderer, x, y, width, height);
 
     let pipeline = renderer
-        .renderer
+        .vulkan
         .pipelines[&VulkanPipelineType::ColorBox]
         .get_pipeline();
 
     let uniform_buffer = Buffer::from_data(
-        renderer.renderer.memory_allocator.clone(),
+        renderer.vulkan.memory_allocator.clone(),
         BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
         default_allocation_create_info(),
         color
     ).unwrap();
 
     let set = PersistentDescriptorSet::new(
-        renderer.renderer.descriptor_set_allocator.as_ref(),
+        renderer.vulkan.descriptor_set_allocator.as_ref(),
         pipeline.layout().set_layouts()[1].clone(),
         [
             WriteDescriptorSet::buffer(0, uniform_buffer),
@@ -915,7 +910,7 @@ fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color:
     ).unwrap();
 
     command_builder.set_cull_mode(CullMode::None).unwrap();
-    command_builder.bind_index_buffer(renderer.renderer.default_box_indices.clone()).unwrap();
+    command_builder.bind_index_buffer(renderer.vulkan.default_box_indices.clone()).unwrap();
     command_builder.bind_vertex_buffers(0, vertices).unwrap();
     command_builder.bind_pipeline_graphics(pipeline).unwrap();
     command_builder.draw_indexed(6, 1, 0, 0, 0).unwrap();
@@ -925,28 +920,28 @@ fn draw_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32, color:
 
 fn draw_sprite(renderer: &Renderer, x: f32, y: f32, scale: f32, bitmap: &Arc<Image>, command_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>) -> MResult<()> {
     let pipeline = renderer
-        .renderer
+        .vulkan
         .pipelines[&VulkanPipelineType::DrawSprite]
         .get_pipeline();
 
     let set = PersistentDescriptorSet::new(
-        renderer.renderer.descriptor_set_allocator.as_ref(),
+        renderer.vulkan.descriptor_set_allocator.as_ref(),
         pipeline.layout().set_layouts()[0].clone(),
         [
-            WriteDescriptorSet::sampler(0, renderer.renderer.default_2d_sampler.clone()),
+            WriteDescriptorSet::sampler(0, renderer.vulkan.default_2d_sampler.clone()),
             WriteDescriptorSet::image_view(1, ImageView::new_default(bitmap.clone())?),
         ],
         []
     ).unwrap();
 
     let [width, height, _] = bitmap.extent();
-    let width = width as f32 * scale / (renderer.renderer.current_resolution.width as f32);
-    let height = height as f32 * scale / (renderer.renderer.current_resolution.height as f32);
+    let width = width as f32 * scale / (renderer.vulkan.current_resolution.width as f32);
+    let height = height as f32 * scale / (renderer.vulkan.current_resolution.height as f32);
 
     let vertices = generate_box(renderer, x, y, width, height);
 
     command_builder.set_cull_mode(CullMode::None).unwrap();
-    command_builder.bind_index_buffer(renderer.renderer.default_box_indices.clone()).unwrap();
+    command_builder.bind_index_buffer(renderer.vulkan.default_box_indices.clone()).unwrap();
     command_builder.bind_vertex_buffers(0, vertices).unwrap();
     command_builder.bind_descriptor_sets(
         PipelineBindPoint::Graphics,
@@ -961,7 +956,7 @@ fn draw_sprite(renderer: &Renderer, x: f32, y: f32, scale: f32, bitmap: &Arc<Ima
 
 fn generate_box(renderer: &Renderer, x: f32, y: f32, width: f32, height: f32) -> Subbuffer<[VulkanModelVertex]> {
     Buffer::from_iter(
-        renderer.renderer.memory_allocator.clone(),
+        renderer.vulkan.memory_allocator.clone(),
         BufferCreateInfo {
             usage: BufferUsage::VERTEX_BUFFER,
             ..Default::default()

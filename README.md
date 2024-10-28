@@ -23,7 +23,6 @@ an official project. Support the official games!
 * [FAQ]
   * [Why make this?]
   * [Why Vulkan and not Direct3D, OpenGL, etc.?]
-  * [Why no-std but also extern crate std?]
   * [Why don't Halo Custom Edition maps look exactly the same?]
   * [Why don't protected maps work?]
   * [Can I use MCC tags?]
@@ -36,7 +35,6 @@ an official project. Support the official games!
 [TODO]: #todo
 [Why make this?]: #why-make-this
 [Why Vulkan and not Direct3D, OpenGL, etc.?]: #why-vulkan-and-not-direct3d-opengl-etc
-[Why no-std but also extern crate std?]: #why-no-std-but-also-extern-crate-std
 [Why don't Halo Custom Edition maps look exactly the same?]: #why-dont-halo-custom-edition-maps-look-exactly-the-same
 [Why don't protected maps work?]: #why-dont-protected-maps-work
 [Can I use MCC tags?]: #can-i-use-mcc-tags
@@ -163,15 +161,6 @@ a wrapper, then wouldn't it be even faster to just target Vulkan directly?
 On the other hand, Direct3D is proprietary and tied to Microsoft Windows. It may
 be worth writing a D3D9 renderer in the future for old Windows XP PCs, but most
 native D3D11/D3D12 cards can just use Vulkan directly.
-
-### Why `#![no-std]` but also `extern crate std;`?
-
-This may seem odd, but we want to leave this open to potentially more rendering
-APIs in the future on systems that lack a standard library, so we're keeping our
-options open. This decision may or may not change later, though.
-
-Vulkano requires the Rust Standard Library, so the Vulkan renderer can make use
-of it.
 
 ### Why don't Halo Custom Edition maps look exactly the same?
 

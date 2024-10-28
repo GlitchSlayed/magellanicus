@@ -1,8 +1,3 @@
-use alloc::vec::Vec;
-use alloc::string::String;
-use alloc::format;
-use alloc::borrow::ToOwned;
-use alloc::vec;
 use glam::Vec3;
 use crate::error::{Error, MResult};
 use crate::renderer::data::{Bitmap, Shader, ShaderType};
@@ -218,7 +213,7 @@ impl BSPData {
             return Err(Error::from_data_error_string("No nodes present".to_owned()))
         }
 
-        let mut tested_nodes = alloc::vec![false; self.nodes.len()];
+        let mut tested_nodes = vec![false; self.nodes.len()];
         for (index, _node) in self.nodes.iter().enumerate() {
             self.validate_3d_node(index, self.nodes.len() + 3, &mut tested_nodes)?;
         }

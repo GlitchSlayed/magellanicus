@@ -1,8 +1,5 @@
-use alloc::vec::Vec;
-use alloc::string::String;
-use alloc::vec;
-use alloc::sync::Arc;
 use core::iter;
+use std::sync::Arc;
 use crate::error::MResult;
 use crate::to_rgbaf32;
 use crate::renderer::{AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, BitmapFormat, Renderer, Resolution};
@@ -29,7 +26,7 @@ impl Bitmap {
             let bitmap = BitmapBitmap {
                 resolution: b.resolution,
                 bitmap_type: b.bitmap_type,
-                vulkan: VulkanBitmapData::new(&mut renderer.renderer, &b)?
+                vulkan: VulkanBitmapData::new(&mut renderer.vulkan, &b)?
             };
             bitmaps.push(bitmap);
         }
@@ -146,8 +143,6 @@ pub fn populate_default_bitmaps(renderer: &mut Renderer) -> MResult<()> {
                 AddBitmapSequenceParameter::Bitmap { first: 3, count: 1 },
             ],
         };
-
-        use alloc::string::ToString;
 
         renderer.add_bitmap(path, add_data)?;
         Ok(renderer.bitmaps.get_key_value(&path.to_string()).unwrap().0.clone())

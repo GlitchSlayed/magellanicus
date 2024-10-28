@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 pub struct ColorCodes {
-    pub codes: BTreeMap<char, ControlCode>
+    pub codes: HashMap<char, ControlCode>
 }
 
 impl Default for ColorCodes {

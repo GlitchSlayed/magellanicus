@@ -1,5 +1,4 @@
-use alloc::sync::Arc;
-use alloc::string::String;
+use std::sync::Arc;
 use crate::error::{Error, MResult};
 
 pub struct Sky {
@@ -31,23 +30,23 @@ pub struct FogData {
 impl FogData {
     pub(crate) fn validate(&self) -> MResult<()> {
         if let Some(c) = self.color.iter().find(|c| **c < 0.0 || **c > 1.0 || !(**c).is_finite()) {
-            return Err(Error::from_data_error_string(alloc::format!("Invalid fog color channel value {c}")))
+            return Err(Error::from_data_error_string(format!("Invalid fog color channel value {c}")))
         }
 
         if self.distance_from < 0.0 || !self.distance_from.is_finite() {
-            return Err(Error::from_data_error_string(alloc::format!("Invalid distance from {}", self.distance_from)))
+            return Err(Error::from_data_error_string(format!("Invalid distance from {}", self.distance_from)))
         }
 
         if self.distance_to < self.distance_from || !self.distance_to.is_finite() {
-            return Err(Error::from_data_error_string(alloc::format!("Invalid distance to {}", self.distance_to)))
+            return Err(Error::from_data_error_string(format!("Invalid distance to {}", self.distance_to)))
         }
 
         if self.min_opacity < 0.0 || self.min_opacity > 1.0 || !self.min_opacity.is_finite() {
-            return Err(Error::from_data_error_string(alloc::format!("Invalid min opacity {}", self.min_opacity)))
+            return Err(Error::from_data_error_string(format!("Invalid min opacity {}", self.min_opacity)))
         }
 
         if self.max_opacity < self.min_opacity || self.max_opacity > 1.0 || !self.max_opacity.is_finite() {
-            return Err(Error::from_data_error_string(alloc::format!("Invalid max opacity {}", self.max_opacity)))
+            return Err(Error::from_data_error_string(format!("Invalid max opacity {}", self.max_opacity)))
         }
 
         Ok(())

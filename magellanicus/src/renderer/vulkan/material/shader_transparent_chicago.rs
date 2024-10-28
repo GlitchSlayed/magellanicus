@@ -92,13 +92,13 @@ impl VulkanShaderTransparentChicagoMaterial {
         };
 
         let uniform_buffer = Buffer::from_data(
-            renderer.renderer.memory_allocator.clone(),
+            renderer.vulkan.memory_allocator.clone(),
             BufferCreateInfo { usage: BufferUsage::UNIFORM_BUFFER, ..Default::default() },
             default_allocation_create_info(),
             uniform
         )?;
 
-        let map_sampler = renderer.renderer.default_2d_sampler.clone();
+        let map_sampler = renderer.vulkan.default_2d_sampler.clone();
 
         let pipeline = match add_shader_parameter.framebuffer_method {
             ShaderTransparentChicagoFramebufferFunction::Add => VulkanPipelineType::ShaderTransparentChicagoAdd,
@@ -112,8 +112,8 @@ impl VulkanShaderTransparentChicagoMaterial {
         };
 
         let descriptor_set = PersistentDescriptorSet::new(
-            renderer.renderer.descriptor_set_allocator.as_ref(),
-            renderer.renderer.pipelines[&pipeline].get_pipeline().layout().set_layouts()[3].clone(),
+            renderer.vulkan.descriptor_set_allocator.as_ref(),
+            renderer.vulkan.pipelines[&pipeline].get_pipeline().layout().set_layouts()[3].clone(),
             [
                 WriteDescriptorSet::buffer(0, uniform_buffer),
                 WriteDescriptorSet::sampler(1, map_sampler),
@@ -145,7 +145,7 @@ impl VulkanMaterial for VulkanShaderTransparentChicagoMaterial {
         to: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>
     ) -> MResult<()> {
         if !repeat_shader {
-            let pipeline = renderer.renderer.pipelines[&self.get_main_pipeline()].clone();
+            let pipeline = renderer.vulkan.pipelines[&self.get_main_pipeline()].clone();
             to.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
                 pipeline.get_pipeline().layout().clone(),

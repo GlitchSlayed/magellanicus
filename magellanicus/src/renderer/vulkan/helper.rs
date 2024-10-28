@@ -84,7 +84,7 @@ fn create_device_and_queues(physical_device: Arc<PhysicalDevice>, device_extensi
         physical_device,
         DeviceCreateInfo {
             enabled_extensions: device_extensions,
-            queue_create_infos: alloc::vec![QueueCreateInfo {
+            queue_create_infos: vec![QueueCreateInfo {
                 queue_family_index,
                 ..Default::default()
             }],
