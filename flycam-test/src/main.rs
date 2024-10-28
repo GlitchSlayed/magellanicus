@@ -965,7 +965,7 @@ impl FlycamTestHandler {
                 let data = font.pixels.bytes.get(start..end)?;
 
                 let character = AddFontParameterCharacter {
-                    characters: char::try_from(c.character as u32).ok()?,
+                    character: char::try_from(c.character as u32).ok()?,
                     data: data.to_vec(),
                     width,
                     height,

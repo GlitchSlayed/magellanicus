@@ -520,7 +520,9 @@ impl Renderer {
             std::fmt::write(&mut text, format_args!("\n")).unwrap();
         }
 
-        let parameter = font.draw_string_to_bitmap(&text, request);
+        let mut vec = Vec::new();
+        font.generate_string_draws(&text, request, &mut vec);
+        let parameter = font.draw_string_buffer_to_bitmap(&vec, request);
         let bitmap = Bitmap::load_from_parameters(self, parameter)?;
         self.debug_text.push_back(bitmap);
 

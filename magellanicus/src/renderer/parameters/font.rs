@@ -15,7 +15,7 @@ impl AddFontParameter {
 }
 
 pub struct AddFontParameterCharacter {
-    pub characters: char,
+    pub character: char,
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,

@@ -25,12 +25,13 @@ impl Font {
             .into_iter()
             .map(|c| {
                 let character = FontCharacter {
+                    character: c.character,
                     data: c.data,
                     width: c.width,
                     height: c.height,
                     advance_x: c.advance_x
                 };
-                (c.characters, character)
+                (c.character, character)
             })
             .collect();
 
@@ -43,6 +44,7 @@ impl Font {
 }
 
 pub struct FontCharacter {
+    pub character: char,
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
@@ -58,60 +60,64 @@ pub struct FontDrawRequest {
 }
 
 impl Font {
-    pub fn draw_string_to_bitmap(&self, string: &str, request: FontDrawRequest) -> AddBitmapParameter {
+    pub fn generate_string_draws(&self, string: &str, request: FontDrawRequest, characters: &mut Vec<DrawableCharacter>) {
+        characters.clear();
+        characters.reserve(string.len());
+        characters.extend(self.iterate_characters(string, request.color, TextState {
+            alignment: request.alignment,
+            ..Default::default()
+        }));
+
+        let mut offset_x = 0i32;
+        let mut current_line_range = 1..usize::MAX;
+        for i in 0..characters.len() {
+            if !current_line_range.contains(&i) {
+                self.handle_new_line(request, &characters, &mut current_line_range, &mut offset_x, i);
+            }
+
+            let character = &mut characters[i];
+            character.x = offset_x;
+            character.y = character.state.y as i32;
+            offset_x += self.characters[&character.character].advance_x;
+        }
+    }
+
+    pub fn draw_string_buffer_to_bitmap(&self, characters: &[DrawableCharacter], request: FontDrawRequest) -> AddBitmapParameter {
         let Some(pixel_count) = request.resolution.width.checked_mul(request.resolution.height) else {
             panic!("width * height overflows")
         };
 
-        let mut bitmap_data: Vec<FloatColor> = vec![[0f32; 4]; pixel_count as usize];
-        let mut characters = Vec::with_capacity(1024);
-        characters.extend(self.iterate_characters(string, request.color, TextState {
-            default_alignment: request.alignment,
-            current_alignment: None,
-            ..Default::default()
-        }));
-
-        let mut current_line_range = 1..usize::MAX;
-        let mut offset_x = 0i32;
-        for i in 0..characters.len() {
-            let character = &characters[i];
-            if !current_line_range.contains(&i) {
-                Self::handle_new_line(request, &characters, &mut current_line_range, &mut offset_x, i, character);
-            }
-
-            let offset_y = character.state.y as i32;
-
+        let mut bitmap_data: Vec<[u8; 4]> = vec![[0u8; 4]; pixel_count as usize];
+        for character in characters {
             // Draw the drop shadow
-            Self::draw_character(
+            self.draw_character(
                 request,
                 bitmap_data.as_mut_slice(),
                 character,
                 [0.0, 0.0, 0.0, character.color[3]],
-                offset_x + 1,
-                offset_y + 1
+                character.x + 1,
+                character.y + 1
             );
 
             // Now the actual color
-            Self::draw_character(
+            self.draw_character(
                 request,
                 bitmap_data.as_mut_slice(),
                 character,
                 character.color,
-                offset_x,
-                offset_y
+                character.x,
+                character.y
             );
-
-            offset_x += character.character.advance_x;
         }
 
         // SAFETY: If this fails, then it's a skill issue, and you should get a better computer.
         let destruction_9000: Vec<u8> = unsafe {
             let mut v_clone = core::mem::ManuallyDrop::new(bitmap_data);
-            Vec::from_raw_parts(v_clone.as_mut_ptr() as *mut u8, v_clone.len() * 16, v_clone.capacity())
+            Vec::from_raw_parts(v_clone.as_mut_ptr() as *mut u8, v_clone.len() * 4, v_clone.capacity())
         };
 
         let bitmap = AddBitmapBitmapParameter {
-            format: BitmapFormat::R32G32B32A32SFloat,
+            format: BitmapFormat::A8B8G8R8,
             bitmap_type: BitmapType::Dim2D,
             resolution: request.resolution,
             mipmap_count: 0,
@@ -125,14 +131,17 @@ impl Font {
     }
 
     fn draw_character(
+        &self,
         request: FontDrawRequest,
-        bitmap_data: &mut [[f32; 4]],
-        character: &FontCharacterIterated,
+        bitmap_data: &mut [[u8; 4]],
+        character: &DrawableCharacter,
         color: FloatColor,
         x_offset: i32,
         y_offset: i32,
     ) {
-        for x in 0..character.character.width {
+        let character_data = &self.characters[&character.character];
+
+        for x in 0..character_data.width {
             let x_offset = x_offset + x as i32;
             if x_offset < 0 {
                 continue;
@@ -141,7 +150,7 @@ impl Font {
             if x_offset >= request.resolution.width as usize {
                 break;
             }
-            for y in 0..character.character.height {
+            for y in 0..character_data.height {
                 let y_offset = y_offset + y as i32;
                 if y_offset < 0 {
                     continue;
@@ -151,7 +160,7 @@ impl Font {
                     break;
                 }
 
-                let alpha = character.character.data[x + y * character.character.width] as f32 / 255.0;
+                let alpha = character_data.data[x + y * character_data.width] as f32 / 255.0;
                 if alpha == 0.0 {
                     continue;
                 }
@@ -160,15 +169,36 @@ impl Font {
                 color[3] *= alpha;
 
                 let modified_pixel = &mut bitmap_data[x_offset + y_offset * request.resolution.width as usize];
-                let original_pixel = Vec4::from(*modified_pixel);
+                let original_pixel = Vec4::from([
+                    modified_pixel[0] as f32 / 255.0,
+                    modified_pixel[1] as f32 / 255.0,
+                    modified_pixel[2] as f32 / 255.0,
+                    modified_pixel[3] as f32 / 255.0
+                ]);
                 let new_pixel = Vec4::from(color);
 
-                *modified_pixel = original_pixel.lerp(new_pixel, color[3]).to_array();
+                let result = original_pixel.lerp(new_pixel, color[3]).to_array();
+
+                *modified_pixel = [
+                    (result[0] * 255.0) as u8,
+                    (result[1] * 255.0) as u8,
+                    (result[2] * 255.0) as u8,
+                    (result[3] * 255.0) as u8,
+                ];
             }
         }
     }
 
-    fn handle_new_line(request: FontDrawRequest, characters: &[FontCharacterIterated], current_line_range: &mut Range<usize>, offset_x: &mut i32, i: usize, character: &FontCharacterIterated) {
+    fn handle_new_line(
+        &self,
+        request: FontDrawRequest,
+        characters: &[DrawableCharacter],
+        current_line_range:
+        &mut Range<usize>,
+        offset_x: &mut i32,
+        i: usize,
+    ) {
+        let first_character = &characters[i];
         let start = i;
         let mut end = characters.len();
         for j in i + 1..characters.len() {
@@ -179,14 +209,14 @@ impl Font {
         }
         *current_line_range = start..end;
 
-        let alignment = character.state.current_alignment.unwrap_or(character.state.default_alignment);
+        let alignment = first_character.state.alignment;
         *offset_x = match alignment {
             TextAlignment::Left => 0,
             TextAlignment::Table(n) => request.tab_offsets.get(n).map(|b| *b).unwrap_or_default(),
             TextAlignment::Right | TextAlignment::Center => {
                 let mut total_width = 0i32;
                 for i in current_line_range.clone() {
-                    total_width += characters[i].character.advance_x
+                    total_width += self.characters[&characters[i].character].advance_x
                 }
 
                 let offset = (request.resolution.width as i32) - (total_width);
@@ -205,7 +235,6 @@ impl Font {
         color: FloatColor,
         text_position: TextState,
     ) -> FontCharacterIterator<'font, 'string> {
-        assert!(text_position.current_alignment.is_none());
         FontCharacterIterator {
             font: self,
             string: string.chars(),
@@ -213,15 +242,15 @@ impl Font {
             pipe_entry: false,
             text_state: text_position,
             modified_color: color,
-            original_color: color
+            original_color: color,
+            default_alignment: text_position.alignment
         }
     }
 }
 
 #[derive(Default, Copy, Clone, Debug)]
-struct TextState {
-    pub default_alignment: TextAlignment,
-    pub current_alignment: Option<TextAlignment>,
+pub struct TextState {
+    pub alignment: TextAlignment,
     pub y: u32,
     pub bold: bool,
     pub underline: bool,
@@ -245,18 +274,22 @@ struct FontCharacterIterator<'font, 'string> {
     pipe_entry: bool,
     original_color: FloatColor,
     modified_color: FloatColor,
+    default_alignment: TextAlignment,
     text_state: TextState,
 }
 
-struct FontCharacterIterated<'font> {
-    pub character: &'font FontCharacter,
+pub struct DrawableCharacter {
+    pub character: char,
     pub color: FloatColor,
     pub state: TextState,
     pub alignment_changed: bool,
+
+    pub x: i32,
+    pub y: i32
 }
 
 impl<'font, 'string> Iterator for FontCharacterIterator<'font, 'string> {
-    type Item = FontCharacterIterated<'font>;
+    type Item = DrawableCharacter;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut alignment_changed = false;
@@ -302,18 +335,17 @@ impl<'font, 'string> Iterator for FontCharacterIterator<'font, 'string> {
                 if next != '|' {
                     alignment_changed = true;
                     match next {
-                        'c' => self.text_state.current_alignment = Some(TextAlignment::Center),
-                        'r' => self.text_state.current_alignment = Some(TextAlignment::Right),
-                        'l' => self.text_state.current_alignment = Some(TextAlignment::Left),
+                        'c' => self.text_state.alignment = TextAlignment::Center,
+                        'r' => self.text_state.alignment = TextAlignment::Right,
+                        'l' => self.text_state.alignment = TextAlignment::Left,
                         't' => {
-                            let table_position = self.text_state.current_alignment.unwrap_or(self.text_state.default_alignment);
-                            let index = if let TextAlignment::Table(n) = table_position {
+                            let index = if let TextAlignment::Table(n) = self.text_state.alignment {
                                 n + 1
                             }
                             else {
                                 0
                             };
-                            self.text_state.current_alignment = Some(TextAlignment::Table(index))
+                            self.text_state.alignment = TextAlignment::Table(index)
                         },
                         'n' => self.newline(),
                         'b' => self.text_state.bold = true,
@@ -335,11 +367,13 @@ impl<'font, 'string> Iterator for FontCharacterIterator<'font, 'string> {
             break as_char;
         };
 
-        Some(FontCharacterIterated {
-            character,
+        Some(DrawableCharacter {
+            character: character.character,
             color: self.modified_color,
             state: self.text_state,
-            alignment_changed
+            alignment_changed,
+            x: 0,
+            y: 0
         })
     }
 }
@@ -347,7 +381,7 @@ impl<'font, 'string> Iterator for FontCharacterIterator<'font, 'string> {
 impl<'font, 'string> FontCharacterIterator<'font, 'string> {
     fn newline(&mut self) {
         self.text_state.y += self.font.line_height;
-        self.text_state.current_alignment = None;
+        self.text_state.alignment = self.default_alignment;
     }
 }
 

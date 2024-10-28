@@ -32,6 +32,7 @@ impl VulkanBitmapData {
             BitmapFormat::DXT5 => (parameter.format, Format::BC3_UNORM_BLOCK, &parameter.data),
             BitmapFormat::BC7 => (parameter.format, Format::BC7_UNORM_BLOCK, &parameter.data),
 
+            BitmapFormat::A8B8G8R8 => (parameter.format, Format::R8G8B8A8_UNORM, &parameter.data),
             BitmapFormat::A8R8G8B8 => (parameter.format, Format::B8G8R8A8_UNORM, &parameter.data),
             BitmapFormat::X8R8G8B8 => (parameter.format, Format::B8G8R8A8_UNORM, &parameter.data),
             BitmapFormat::R5G6B5 => (parameter.format, Format::R5G6B5_UNORM_PACK16, &parameter.data),
