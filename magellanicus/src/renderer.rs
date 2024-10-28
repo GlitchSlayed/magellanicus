@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::Instant;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use data::*;
 
@@ -34,10 +35,13 @@ pub struct Renderer {
     default_bitmaps: DefaultBitmaps,
     current_bsp: Option<Arc<String>>,
 
-    displayed_fps: f32,
+    fps_counter_value: f64,
+    fps_counter_time: Instant,
+    fps_counter_count: u32,
+
     debug_text: VecDeque<Bitmap>,
     debug_text_stale: bool,
-    debug_font: Option<Arc<String>>
+    debug_font: Option<Arc<String>>,
 }
 
 impl Renderer {
@@ -122,7 +126,9 @@ impl Renderer {
             fonts: HashMap::new(),
             current_bsp: None,
             default_bitmaps: DefaultBitmaps::default(),
-            displayed_fps: 0.0,
+            fps_counter_value: 0.0,
+            fps_counter_count: 0,
+            fps_counter_time: Instant::now(),
             debug_text: VecDeque::with_capacity(64),
             debug_text_stale: true,
             debug_font: None,
@@ -363,7 +369,11 @@ impl Renderer {
             self.draw_debug_text()?;
         }
         self.fixup_fog_and_render_distances();
-        VulkanRenderer::draw_frame(self)
+        let result = VulkanRenderer::draw_frame(self)?;
+
+        self.update_frame_rate_counter();
+
+        Ok(result)
     }
 
     /// Set whether debug info is displayed.
@@ -384,14 +394,6 @@ impl Renderer {
 
         self.invalidate_debug_text();
         Ok(())
-    }
-
-    /// Set the displayed frame rate.
-    pub fn set_debug_fps(&mut self, fps: f32) {
-        if self.displayed_fps != fps {
-            self.displayed_fps = fps;
-            self.invalidate_debug_text();
-        }
     }
 
     pub fn invalidate_debug_text(&mut self) {
@@ -465,8 +467,8 @@ impl Renderer {
 
         let font = self.fonts.get(f).expect("selected debug font no longer loaded?");
 
-        let fps = self.displayed_fps;
-        let fps_ms = 1000.0 / fps;
+        let fps = self.fps_counter_value;
+        let fps_ms = (1000.0 / fps) as f32;
 
         let max = 12.0;
         let min = 1.0;
@@ -558,6 +560,17 @@ impl Renderer {
         };
         debug_assert_eq!(BitmapType::Cubemap, bitmap.bitmap_type);
         bitmap
+    }
+    fn update_frame_rate_counter(&mut self) {
+        self.fps_counter_count = self.fps_counter_count.saturating_add(1);
+
+        let now = Instant::now();
+        let microseconds_since = (now - self.fps_counter_time).as_micros();
+        if microseconds_since >= 1000000 {
+            self.fps_counter_value = self.fps_counter_count as f64 / ((microseconds_since as f64) / 1000000.0);
+            self.fps_counter_time = now;
+            self.fps_counter_count = 0;
+        }
     }
 }
 

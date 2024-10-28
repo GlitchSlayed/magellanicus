@@ -1128,8 +1128,6 @@ impl FlycamTestHandler {
 fn run_renderer_thread(renderer: Weak<Mutex<Renderer>>, pause_rendering: Arc<AtomicBool>, velocity: Arc<[[AtomicU32; 4]; 4]>, camera_channel: Receiver<(f32, f32, usize)>) {
     let time_start = Instant::now();
     let mut last_loop = 0.0;
-    let mut time_since_last_fps = Instant::now();
-    let mut frames_rendered = 0u64;
     while let Some(renderer) = renderer.upgrade() {
         if pause_rendering.load(Ordering::Relaxed) {
             continue;
@@ -1185,15 +1183,6 @@ fn run_renderer_thread(renderer: Weak<Mutex<Renderer>>, pause_rendering: Arc<Ato
                 eprintln!("Render fail: {e}");
                 continue;
             }
-        }
-
-        frames_rendered += 1;
-        let time_taken = Instant::now() - time_since_last_fps;
-        if time_taken.as_secs() >= 1 {
-            let frames_per_second = (frames_rendered as f64) / (time_taken.as_micros() as f64 / 1000000.0);
-            renderer.set_debug_fps(frames_per_second as f32);
-            time_since_last_fps = Instant::now();
-            frames_rendered = 0;
         }
 
         drop(renderer);
