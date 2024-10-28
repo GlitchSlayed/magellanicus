@@ -16,7 +16,6 @@ pub use bsp::*;
 pub use geometry::*;
 pub use material::*;
 pub use pipeline::*;
-pub use font::*;
 
 use crate::error::{Error, MResult};
 use crate::renderer::data::{BSPGeometry, BSP, MAX_DRAW_DISTANCE_LIMIT};

@@ -3,11 +3,12 @@ use crate::renderer::mipmap_iterator::{MipmapFaceIterator, MipmapMetadata, Mipma
 use crate::renderer::vulkan::{default_allocation_create_info, VulkanRenderer};
 use crate::renderer::{decode_p8_to_a8r8g8b8le, AddBitmapBitmapParameter, BitmapFormat, BitmapType};
 use std::num::NonZeroUsize;
+use std::println;
 use std::string::ToString;
 use std::sync::Arc;
 use std::vec::Vec;
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferToImageInfo};
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, BufferImageCopy, CommandBufferUsage, CopyBufferToImageInfo, PrimaryAutoCommandBuffer};
 use vulkano::format::Format;
 use vulkano::image::{Image, ImageAspects, ImageCreateFlags, ImageCreateInfo, ImageSubresourceLayers, ImageType, ImageUsage};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryAllocatePreference, MemoryTypeFilter};
@@ -158,6 +159,28 @@ impl VulkanBitmapData {
             CommandBufferUsage::OneTimeSubmit,
         )?;
 
+        // Simple bitmaps don't need iterated.
+        if parameter.bitmap_type == BitmapType::Dim2D
+            && parameter.mipmap_count == 0
+            && parameter.format.block_pixel_length() == 1 {
+            upload_image(
+                &image,
+                &upload_buffer,
+                &mut command_buffer_builder,
+                0,
+                0,
+                parameter.resolution.width,
+                parameter.resolution.height,
+                0,
+                parameter.resolution.width,
+                parameter.resolution.height,
+                1
+            )?;
+            let buffer = command_buffer_builder.build()?;
+            vulkan_renderer.execute_command_list(buffer);
+            return Ok(Self { image })
+        }
+
         let width_nzus = NonZeroUsize::new(parameter.resolution.width as usize).unwrap();
         let height_nzus = NonZeroUsize::new(parameter.resolution.height as usize).unwrap();
         let bitmap_type = match parameter.bitmap_type {
@@ -211,27 +234,15 @@ impl VulkanBitmapData {
                     _ => continue
                 }
             };
-            command_buffer_builder.copy_buffer_to_image(CopyBufferToImageInfo {
-                regions: [
-                    BufferImageCopy {
-                        image_subresource: ImageSubresourceLayers {
-                            aspects: ImageAspects::COLOR,
-                            mip_level: i.mipmap_index as u32,
-                            array_layers: actual_face_index..(actual_face_index + 1)
-                        },
-                        buffer_offset: offset,
-                        buffer_image_height: (i.block_height * pixel_size) as u32,
-                        buffer_row_length: (i.block_width * pixel_size) as u32,
-                        image_offset: [0,0,0],
-                        image_extent: [i.width as u32, i.height as u32, i.depth as u32],
-                        ..Default::default()
-                    }
-                ].into(),
-                ..CopyBufferToImageInfo::buffer_image(
-                    upload_buffer.clone(),
-                    image.clone()
-                )
-            })?;
+
+            let mip_height_physical = (i.block_height * pixel_size) as u32;
+            let mip_width_physical = (i.block_width * pixel_size) as u32;
+            let mip_level = i.mipmap_index as u32;
+            let mip_width_logical = i.width as u32;
+            let mip_height_logical = i.height as u32;
+            let mip_depth_logical = i.depth as u32;
+
+            upload_image(&image, &upload_buffer, &mut command_buffer_builder, offset, actual_face_index, mip_width_physical, mip_height_physical, mip_level, mip_width_logical, mip_height_logical, mip_depth_logical)?;
 
             offset += size as DeviceSize;
         }
@@ -241,4 +252,29 @@ impl VulkanBitmapData {
 
         Ok(Self { image })
     }
+}
+
+fn upload_image(image: &Arc<Image>, upload_buffer: &Subbuffer<[u8]>, command_buffer_builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, offset: DeviceSize, actual_face_index: u32, mip_width_physical: u32, mip_height_physical: u32, mip_level: u32, mip_width_logical: u32, mip_height_logical: u32, mip_depth_logical: u32) -> Result<(), Error> {
+    command_buffer_builder.copy_buffer_to_image(CopyBufferToImageInfo {
+        regions: [
+            BufferImageCopy {
+                image_subresource: ImageSubresourceLayers {
+                    aspects: ImageAspects::COLOR,
+                    array_layers: actual_face_index..(actual_face_index + 1),
+                    mip_level,
+                },
+                buffer_offset: offset,
+                buffer_image_height: mip_height_physical,
+                buffer_row_length: mip_width_physical,
+                image_offset: [0, 0, 0],
+                image_extent: [mip_width_logical, mip_height_logical, mip_depth_logical],
+                ..Default::default()
+            }
+        ].into(),
+        ..CopyBufferToImageInfo::buffer_image(
+            upload_buffer.clone(),
+            image.clone()
+        )
+    })?;
+    Ok(())
 }

@@ -471,8 +471,6 @@ impl Renderer {
 
         let font = self.fonts.get(f).expect("selected debug font no longer loaded?");
 
-        let mut text = String::with_capacity(1024);
-
         let fps = self.displayed_fps;
         let fps_ms = 1000.0 / fps;
 
@@ -507,6 +505,8 @@ impl Renderer {
             ..FontDrawRequest::default()
         };
 
+        let mut text = String::with_capacity(1024);
+
         std::fmt::write(&mut text, format_args!("FPS: {fps:-7.03} ({fps_ms} ms / frame)\n^7BSP: {bsp}\n\n",
                                                 bsp=self.current_bsp.as_ref().map(|b| {
                                                     let bsp = b.as_str();
@@ -518,9 +518,9 @@ impl Renderer {
 
         for (index, viewport) in self.player_viewports.iter().enumerate() {
             std::fmt::write(&mut text, format_args!("Viewport #{index}\n")).unwrap();
-            std::fmt::write(&mut text, format_args!("  X: {:12.07}\n", viewport.camera.position[0])).unwrap();
-            std::fmt::write(&mut text, format_args!("  Y: {:12.07}\n", viewport.camera.position[1])).unwrap();
-            std::fmt::write(&mut text, format_args!("  Z: {:12.07}\n", viewport.camera.position[2])).unwrap();
+            std::fmt::write(&mut text, format_args!("  X:{:13.06}\n", viewport.camera.position[0])).unwrap();
+            std::fmt::write(&mut text, format_args!("  Y:{:13.06}\n", viewport.camera.position[1])).unwrap();
+            std::fmt::write(&mut text, format_args!("  Z:{:13.06}\n", viewport.camera.position[2])).unwrap();
             std::fmt::write(&mut text, format_args!("\n")).unwrap();
         }
 
