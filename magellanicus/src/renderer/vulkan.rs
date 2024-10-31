@@ -26,6 +26,7 @@ use crate::renderer::vulkan::helper::{build_swapchain, LoadedVulkan};
 use crate::renderer::vulkan::vertex::{VulkanFogData, VulkanModelData, VulkanModelVertex};
 use crate::renderer::{Camera, FogData, Renderer, RendererParameters, Resolution, MSAA};
 use crate::vertex::VertexOffsets;
+use crate::types::FloatColor;
 use glam::{Mat3, Mat4, Vec3};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
@@ -48,7 +49,6 @@ use vulkano::render_pass::{AttachmentLoadOp, AttachmentStoreOp, Framebuffer, Fra
 use vulkano::swapchain::{acquire_next_image, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 use vulkano::{single_pass_renderpass, Validated, ValidationError, VulkanError};
-use crate::FloatColor;
 
 pub(crate) static OFFLINE_PIPELINE_COLOR_FORMAT: Format = Format::R8G8B8A8_UNORM;
 

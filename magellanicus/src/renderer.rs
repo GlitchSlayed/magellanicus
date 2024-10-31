@@ -14,7 +14,7 @@ pub use player_viewport::get_default_vertical_fov;
 pub use player_viewport::horizontal_to_vertical_fov;
 
 use glam::{FloatExt, Vec3};
-use crate::FloatColor;
+use crate::types::FloatColor;
 
 mod parameters;
 mod vulkan;

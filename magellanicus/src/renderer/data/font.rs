@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::str::Chars;
 use glam::Vec4;
 use crate::error::MResult;
-use crate::FloatColor;
+use crate::types::FloatColor;
 use crate::renderer::{AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, AddFontParameter, BitmapFormat, BitmapType, Renderer, Resolution};
 use crate::renderer::data::font::colors::{ControlCode, ColorCodes};
 

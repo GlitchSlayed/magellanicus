@@ -1,7 +1,7 @@
 use core::iter;
 use std::sync::Arc;
 use crate::error::MResult;
-use crate::to_rgbaf32;
+use crate::types::to_rgbaf32;
 use crate::renderer::{AddBitmapBitmapParameter, AddBitmapParameter, AddBitmapSequenceParameter, BitmapFormat, Renderer, Resolution};
 use crate::renderer::vulkan::VulkanBitmapData;
 
